@@ -868,8 +868,11 @@
         const APP = {
             config: {
                 adminPass: 'admin123',
-                wsUrl: 'ws://localhost:3000',
-                apiUrl: 'http://localhost:3000/api'
+                // Automatically detect the correct URL based on where app is running
+                wsUrl: window.location.protocol === 'https:' 
+                    ? `wss://${window.location.host}` 
+                    : `ws://${window.location.host}`,
+                apiUrl: `${window.location.origin}/api`
             },
             
             state: {
