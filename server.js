@@ -596,13 +596,15 @@ app.get('/api/calls', verifyToken, (req, res) => {
 app.get('/api/calls/:callId', verifyToken, (req, res) => {
     try {
         const { callId } = req.params;
-        console.log(`📊 Polling check for call: ${callId}`);
         
         const call = database.calls.find(c => c.id === callId);
         
         if (!call) {
+            console.log(`📊 Poll for ${callId} - NOT FOUND`);
             return res.status(404).json({ error: 'Call not found' });
         }
+        
+        console.log(`📊 Poll for ${callId.substring(0, 20)}... - Status: ${call.status}`);
         
         res.json({
             id: call.id,
