@@ -592,6 +592,31 @@ app.get('/api/calls', verifyToken, (req, res) => {
     }
 });
 
+// Get single call by ID (for polling fallback)
+app.get('/api/calls/:callId', verifyToken, (req, res) => {
+    try {
+        const { callId } = req.params;
+        console.log(`📊 Polling check for call: ${callId}`);
+        
+        const call = database.calls.find(c => c.id === callId);
+        
+        if (!call) {
+            return res.status(404).json({ error: 'Call not found' });
+        }
+        
+        res.json({
+            id: call.id,
+            studentName: call.studentName,
+            startTime: call.startTime,
+            endTime: call.endTime,
+            duration: call.duration,
+            status: call.status
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ---------------------------------------------------------
 // 🪝 TWILIO WEBHOOKS - THE HEART OF REAL-TIME SYNC
 // When the other person hangs up, Twilio calls this endpoint
