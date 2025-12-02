@@ -882,8 +882,10 @@
                 callData: null,
                 callStartTime: null,
                 callTimer: null,
+                statusPoller: null,
                 ws: null,
-                wsConnected: false
+                wsConnected: false,
+                wsPingInterval: null
             },
             
             init() {
@@ -952,6 +954,14 @@
                         console.log('✅ WebSocket connected to backend');
                         this.state.wsConnected = true;
                         document.getElementById('lastUpdate').textContent = 'Connected ✅';
+                        
+                        // Send keepalive ping every 25 seconds to prevent Render from closing connection
+                        this.state.wsPingInterval = setInterval(() => {
+                            if (this.state.ws && this.state.ws.readyState === WebSocket.OPEN) {
+                                this.state.ws.send(JSON.stringify({ type: 'PING' }));
+                                console.log('🏓 WebSocket keepalive ping sent');
+                            }
+                        }, 25000);
                     };
                     
                     this.state.ws.onmessage = (event) => {
@@ -960,16 +970,23 @@
                     };
                     
                     this.state.ws.onerror = (error) => {
-                        console.warn('⚠️ Backend not running (using local mode)');
+                        console.warn('⚠️ WebSocket error - will retry');
                         this.state.wsConnected = false;
-                        document.getElementById('lastUpdate').textContent = 'Local Mode';
+                        document.getElementById('lastUpdate').textContent = 'Reconnecting...';
                     };
                     
                     this.state.ws.onclose = () => {
-                        console.log('🔌 WebSocket disconnected - using local mode');
+                        console.log('🔌 WebSocket disconnected - reconnecting in 3s');
                         this.state.wsConnected = false;
-                        document.getElementById('lastUpdate').textContent = 'Local Mode';
-                        setTimeout(() => this.connectWebSocket(), 5000);
+                        document.getElementById('lastUpdate').textContent = 'Reconnecting...';
+                        
+                        // Clear ping interval
+                        if (this.state.wsPingInterval) {
+                            clearInterval(this.state.wsPingInterval);
+                        }
+                        
+                        // Reconnect faster
+                        setTimeout(() => this.connectWebSocket(), 3000);
                     };
                 } catch(e) {
                     console.log('💡 Backend not available - using LOCAL MODE (all features still work!)');
@@ -979,6 +996,11 @@
             },
             
             handleWebSocketMessage(msg) {
+                // Handle PONG silently
+                if (msg.type === 'PONG') {
+                    return;
+                }
+                
                 console.log('📡 WebSocket message received:', msg.type, msg.data);
                 
                 switch(msg.type) {
@@ -1549,6 +1571,8 @@
             
             startCallTimer() {
                 this.state.callStartTime = Date.now();
+                
+                // Timer for display
                 this.state.callTimer = setInterval(() => {
                     const elapsed = Math.floor((Date.now() - this.state.callStartTime) / 1000);
                     const min = Math.floor(elapsed / 60);
@@ -1556,6 +1580,53 @@
                     document.getElementById('callTimer').textContent = 
                         `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
                 }, 1000);
+                
+                // FALLBACK: Poll server for call status every 3 seconds
+                // This ensures UI updates even if WebSocket fails
+                this.state.statusPoller = setInterval(async () => {
+                    if (!this.state.callData || !this.state.callActive) {
+                        this.stopStatusPoller();
+                        return;
+                    }
+                    
+                    try {
+                        const callId = this.state.callData.callId;
+                        if (!callId || callId.startsWith('call_')) return; // Skip for offline mode
+                        
+                        const res = await fetch(`${this.config.apiUrl}/calls/${callId}`, {
+                            headers: {
+                                'Authorization': `Bearer ${this.state.user?.token || 'demo'}`
+                            }
+                        });
+                        
+                        if (res.ok) {
+                            const callData = await res.json();
+                            console.log('📊 Poll check - Call status:', callData.status);
+                            
+                            // If call is completed but UI still shows active, update it
+                            if (callData.status === 'completed' && this.state.callActive) {
+                                console.log('🔄 Fallback: Updating call status from poll');
+                                this.handleCallEnded({
+                                    callId: callId,
+                                    studentName: this.state.callData.studentName,
+                                    duration: callData.duration || 0,
+                                    endedAt: callData.endTime || new Date().toISOString(),
+                                    endedBy: 'remote'
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore polling errors
+                        console.log('⚠️ Poll check failed:', e.message);
+                    }
+                }, 3000);
+            },
+            
+            stopStatusPoller() {
+                if (this.state.statusPoller) {
+                    clearInterval(this.state.statusPoller);
+                    this.state.statusPoller = null;
+                }
             },
             
             stopCallTimer() {
@@ -1563,6 +1634,7 @@
                     clearInterval(this.state.callTimer);
                     this.state.callTimer = null;
                 }
+                this.stopStatusPoller();
             },
             
             openCallModal() {
