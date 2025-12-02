@@ -43,6 +43,19 @@ wss.on('connection', (ws) => {
         }
     }));
     
+    // Handle messages from client (including PING keepalive)
+    ws.on('message', (message) => {
+        try {
+            const msg = JSON.parse(message);
+            if (msg.type === 'PING') {
+                // Respond with PONG to keep connection alive
+                ws.send(JSON.stringify({ type: 'PONG' }));
+            }
+        } catch (e) {
+            // Ignore parse errors
+        }
+    });
+    
     ws.on('close', () => {
         console.log('🔌 WebSocket client disconnected');
         connectedClients.delete(ws);
