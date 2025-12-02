@@ -1013,15 +1013,22 @@
                         break;
                     case 'CALL_ENDED':
                         console.log(`📞 Call ended by: ${msg.data.endedBy} for ${msg.data.studentName}`);
-                        this.handleCallEnded(msg.data);
+                        // If we have ANY active call, end it when we receive CALL_ENDED
+                        if (this.state.callActive) {
+                            this.handleCallEnded(msg.data);
+                        }
                         break;
                     case 'CALL_FAILED':
                         console.log(`❌ Call failed: ${msg.data.reason} for ${msg.data.studentName}`);
-                        this.handleCallFailed(msg.data);
+                        if (this.state.callActive) {
+                            this.handleCallFailed(msg.data);
+                        }
                         break;
                     case 'CALL_CONNECTED':
                         console.log(`✅ Call connected for ${msg.data.studentName}`);
-                        this.handleCallConnected(msg.data);
+                        if (this.state.callActive) {
+                            this.handleCallConnected(msg.data);
+                        }
                         break;
                     case 'STUDENT_ADDED':
                     case 'STUDENT_UPDATED':
@@ -1051,9 +1058,22 @@
             },
             
             handleCallEnded(data) {
-                console.log('📞 handleCallEnded - received callId:', data.callId, '| stored callId:', this.state.callData?.callId);
+                console.log('📞 handleCallEnded called');
+                console.log('   Received callId:', data.callId);
+                console.log('   Stored callId:', this.state.callData?.callId);
+                console.log('   Call active:', this.state.callActive);
                 
-                if (this.state.callData?.callId === data.callId) {
+                // More robust check - if we have an active call, end it
+                // This handles cases where callId might not match exactly
+                const callIdMatch = this.state.callData?.callId === data.callId;
+                const hasActiveCall = this.state.callActive && this.state.callData;
+                
+                // End the call if: IDs match OR we have an active call with same student
+                const shouldEndCall = callIdMatch || 
+                    (hasActiveCall && this.state.callData.studentName === data.studentName);
+                
+                if (shouldEndCall) {
+                    console.log('✅ Ending call - match confirmed');
                     this.state.callData.status = 'ended';
                     this.state.callData.endedAt = data.endedAt;
                     this.state.callData.duration = data.duration;
@@ -1078,9 +1098,29 @@
                     this.updateCallUI();
                     this.showAlert(alertMessage, 'success');
                     setTimeout(() => this.closeCallModal(), 2000);
+                } else if (hasActiveCall) {
+                    // We have an active call but IDs don't match - log but still try to end
+                    console.log('⚠️ Call ID mismatch but have active call - forcing end');
+                    this.forceEndActiveCall(data.duration || 0);
                 } else {
-                    console.log('⚠️ Call ID mismatch - ignoring message');
+                    console.log('ℹ️ No active call to end');
                 }
+            },
+            
+            forceEndActiveCall(duration) {
+                if (!this.state.callActive || !this.state.callData) return;
+                
+                console.log('🔄 Force ending active call');
+                this.state.callData.status = 'ended';
+                this.state.callActive = false;
+                this.stopCallTimer();
+                
+                document.getElementById('callStatusText').textContent = 'Call Ended';
+                document.getElementById('callStatusIndicator').className = 'status-indicator status-ended';
+                document.getElementById('btnEndCall').disabled = true;
+                this.updateCallUI();
+                this.showAlert(`✅ Call ended - Duration: ${duration}s`, 'success');
+                setTimeout(() => this.closeCallModal(), 2000);
             },
             
             handleCallFailed(data) {
@@ -1581,7 +1621,7 @@
                         `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
                 }, 1000);
                 
-                // FALLBACK: Poll server for call status every 3 seconds
+                // FALLBACK: Poll server for call status every 2 seconds
                 // This ensures UI updates even if WebSocket fails
                 this.state.statusPoller = setInterval(async () => {
                     if (!this.state.callData || !this.state.callActive) {
@@ -1591,7 +1631,12 @@
                     
                     try {
                         const callId = this.state.callData.callId;
-                        if (!callId || callId.startsWith('call_')) return; // Skip for offline mode
+                        console.log('📊 Polling call status for:', callId);
+                        
+                        if (!callId || callId.startsWith('call_') || callId.startsWith('sim_')) {
+                            console.log('⚠️ Skipping poll - offline/simulated call');
+                            return;
+                        }
                         
                         const res = await fetch(`${this.config.apiUrl}/calls/${callId}`, {
                             headers: {
@@ -1601,25 +1646,20 @@
                         
                         if (res.ok) {
                             const callData = await res.json();
-                            console.log('📊 Poll check - Call status:', callData.status);
+                            console.log('📊 Poll result - Call status:', callData.status);
                             
                             // If call is completed but UI still shows active, update it
                             if (callData.status === 'completed' && this.state.callActive) {
                                 console.log('🔄 Fallback: Updating call status from poll');
-                                this.handleCallEnded({
-                                    callId: callId,
-                                    studentName: this.state.callData.studentName,
-                                    duration: callData.duration || 0,
-                                    endedAt: callData.endTime || new Date().toISOString(),
-                                    endedBy: 'remote'
-                                });
+                                this.forceEndActiveCall(callData.duration || 0);
                             }
+                        } else {
+                            console.log('⚠️ Poll response not ok:', res.status);
                         }
                     } catch (e) {
-                        // Ignore polling errors
                         console.log('⚠️ Poll check failed:', e.message);
                     }
-                }, 3000);
+                }, 2000);
             },
             
             stopStatusPoller() {
