@@ -1074,44 +1074,50 @@
                 console.log('   Call active:', this.state.callActive);
                 
                 // More robust check - if we have an active call, end it
-                // This handles cases where callId might not match exactly
                 const callIdMatch = this.state.callData?.callId === data.callId;
                 const hasActiveCall = this.state.callActive && this.state.callData;
                 
-                // End the call if: IDs match OR we have an active call with same student
-                const shouldEndCall = callIdMatch || 
-                    (hasActiveCall && this.state.callData.studentName === data.studentName);
-                
-                if (shouldEndCall) {
-                    console.log('✅ Ending call - match confirmed');
-                    this.state.callData.status = 'ended';
-                    this.state.callData.endedAt = data.endedAt;
-                    this.state.callData.duration = data.duration;
+                // End the call if: IDs match OR we have any active call
+                if (callIdMatch || hasActiveCall) {
+                    console.log('✅ Ending call now');
+                    
+                    // Update state FIRST
                     this.state.callActive = false;
+                    if (this.state.callData) {
+                        this.state.callData.status = 'ended';
+                        this.state.callData.endedAt = data.endedAt;
+                        this.state.callData.duration = data.duration;
+                    }
                     this.stopCallTimer();
                     
-                    // Show different message based on who ended the call
-                    let statusMessage = 'Call Ended';
-                    let alertMessage = `✅ Call ended - Duration: ${data.duration}s`;
+                    // Update UI elements directly
+                    const statusText = document.getElementById('callStatusText');
+                    const statusIndicator = document.getElementById('callStatusIndicator');
+                    const endBtn = document.getElementById('btnEndCall');
+                    const callInfo = document.getElementById('callInfo');
+                    const callModal = document.getElementById('callModal');
                     
-                    if (data.endedBy === 'remote') {
-                        statusMessage = 'Call Ended (Other Party)';
-                        alertMessage = `📞 ${this.state.callData.studentName} ended the call - Duration: ${data.duration}s`;
-                    } else if (data.endedBy === 'canceled') {
-                        statusMessage = 'Call Canceled';
-                        alertMessage = `⚠️ Call was canceled`;
+                    const endMessage = data.endedBy === 'remote' ? 'Call Ended (Other Party)' : 'Call Ended';
+                    
+                    if (statusText) statusText.textContent = endMessage;
+                    if (statusText) statusText.style.color = '#ff6b6b';
+                    if (statusIndicator) statusIndicator.className = 'status-indicator status-ended';
+                    if (endBtn) endBtn.disabled = true;
+                    if (callInfo) callInfo.textContent = `Status: ENDED | Duration: ${data.duration || 0}s`;
+                    
+                    // Show alert
+                    const alertMsg = data.endedBy === 'remote' 
+                        ? `📞 ${this.state.callData?.studentName || 'Student'} ended the call`
+                        : `✅ Call ended`;
+                    this.showAlert(alertMsg, 'success');
+                    
+                    // Close modal IMMEDIATELY
+                    if (callModal) {
+                        callModal.classList.remove('active');
+                        console.log('🚪 Modal closed');
                     }
                     
-                    document.getElementById('callStatusText').textContent = statusMessage;
-                    document.getElementById('callStatusIndicator').className = 'status-indicator status-ended';
-                    document.getElementById('btnEndCall').disabled = true;
-                    this.updateCallUI();
-                    this.showAlert(alertMessage, 'success');
-                    setTimeout(() => this.closeCallModal(), 2000);
-                } else if (hasActiveCall) {
-                    // We have an active call but IDs don't match - log but still try to end
-                    console.log('⚠️ Call ID mismatch but have active call - forcing end');
-                    this.forceEndActiveCall(data.duration || 0);
+                    console.log('✅ Call ended and modal closed');
                 } else {
                     console.log('ℹ️ No active call to end');
                 }
@@ -1125,7 +1131,7 @@
                     return;
                 }
                 
-                // Stop everything
+                // Stop everything FIRST
                 this.state.callActive = false;
                 this.stopCallTimer();
                 
@@ -1133,22 +1139,27 @@
                     this.state.callData.status = 'ended';
                 }
                 
-                // Update UI
-                try {
-                    document.getElementById('callStatusText').textContent = 'Call Ended';
-                    document.getElementById('callStatusIndicator').className = 'status-indicator status-ended';
-                    document.getElementById('btnEndCall').disabled = true;
-                    document.getElementById('callInfo').textContent = `Status: ENDED | Duration: ${duration}s`;
-                } catch(e) {
-                    console.error('UI update error:', e);
-                }
+                // Update UI elements directly and aggressively
+                const statusText = document.getElementById('callStatusText');
+                const statusIndicator = document.getElementById('callStatusIndicator');
+                const endBtn = document.getElementById('btnEndCall');
+                const callInfo = document.getElementById('callInfo');
+                const callModal = document.getElementById('callModal');
                 
+                if (statusText) statusText.textContent = 'Call Ended';
+                if (statusText) statusText.style.color = '#ff6b6b';
+                if (statusIndicator) statusIndicator.className = 'status-indicator status-ended';
+                if (endBtn) endBtn.disabled = true;
+                if (callInfo) callInfo.textContent = `Status: ENDED | Duration: ${duration}s`;
+                
+                // Show alert
                 this.showAlert(`✅ Call ended - Duration: ${duration}s`, 'success');
                 
-                // Close modal after delay
-                setTimeout(() => {
-                    this.closeCallModal();
-                }, 2000);
+                // Close modal IMMEDIATELY (no delay)
+                if (callModal) {
+                    callModal.classList.remove('active');
+                    console.log('🚪 Modal closed immediately');
+                }
                 
                 console.log('✅ Call ended successfully');
             },
