@@ -1904,23 +1904,43 @@
                 return stopTimer;
             }, [callState.status, callState.isHoldActive, stopTimer]);
 
-            // Polling effect - FALLBACK mechanism (WebSocket is primary)
-            // Polls every 3 seconds as backup in case WebSocket disconnects
+            // Polling effect - Primary detection mechanism
+            // Server checks Twilio directly on every poll for active calls
+            // Polls every 1 second for instant hangup detection
             useEffect(() => {
                 if (callState.sid && (callState.status === 'dialing' || callState.status === 'active')) {
-                    console.log('🔄 Starting fallback poll for call:', callState.sid);
+                    console.log('🔄 Starting real-time poll for call:', callState.sid);
+                    
+                    // Immediate first check
+                    (async () => {
+                        try {
+                            const data = await api.getStatus(callState.sid);
+                            const terminalStatuses = ['completed', 'busy', 'no-answer', 'canceled', 'failed'];
+                            if (terminalStatuses.includes(data.status)) {
+                                console.log('🔴 Call already ended:', data.status);
+                                handleCallEnd({ 
+                                    finalStatus: data.status, 
+                                    finalDuration: data.duration || 0, 
+                                    recordingUrl: data.recordingUrl,
+                                    manual: false
+                                });
+                                return;
+                            }
+                        } catch (e) {
+                            console.error('Initial status check error:', e);
+                        }
+                    })();
                     
                     pollIntervalRef.current = setInterval(async () => {
                         try {
                             const data = await api.getStatus(callState.sid);
                             pollFailuresRef.current = 0;
                             
-                            // Only log if status changed or important
                             const currentStatus = callStateRef.current.status;
                             
-                            // Handle call connected (if WebSocket missed it)
+                            // Handle call connected
                             if (data.status === 'in-progress' && currentStatus === 'dialing') {
-                                console.log('✅ Call connected (via poll fallback)');
+                                console.log('✅ Call connected!');
                                 stopTimeout(); 
                                 audioManager.stop();
                                 setCallState(s => ({...s, status: 'active'}));
@@ -1932,15 +1952,14 @@
                                     setCallState(s => ({...s, isMicrophoneReady: true, isMuted: false}));
                                 } catch (micError) {
                                     console.error("Mic error:", micError);
-                                    addToast("Microphone access denied. Call will proceed without audio.", 'error');
                                     setCallState(s => ({...s, isMicrophoneReady: false}));
                                 }
                             }
                             
-                            // Handle call ended - detect terminal statuses (if WebSocket missed it)
+                            // Handle call ended - detect terminal statuses
                             const terminalStatuses = ['completed', 'busy', 'no-answer', 'canceled', 'failed'];
                             if (terminalStatuses.includes(data.status) && currentStatus !== 'finished') {
-                                console.log('🔴 Call ended detected via poll fallback:', data.status);
+                                console.log('🔴 Call ended detected:', data.status);
                                 // Stop polling immediately
                                 if (pollIntervalRef.current) {
                                     clearInterval(pollIntervalRef.current);
@@ -1962,7 +1981,7 @@
                                 requestCallEnd();
                             }
                         }
-                    }, 3000); // Poll every 3 seconds as FALLBACK (WebSocket is primary)
+                    }, 1000); // Poll EVERY SECOND for real-time detection
                 }
                 return stopPolling;
             }, [callState.sid, callState.status, stopPolling, stopTimeout, addToast, handleCallEnd, requestCallEnd]);
