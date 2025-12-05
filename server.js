@@ -1,15 +1,22 @@
 // ========================================
 // QURAN ACADEMY CALLING SERVER
-// Matching G-Studio Design API Endpoints
+// With WebSocket Real-Time Updates
 // ========================================
 
 const express = require('express');
 const twilio = require('twilio');
 const cors = require('cors');
 const path = require('path');
+const http = require('http');
+const WebSocket = require('ws');
 require('dotenv').config();
 
 const app = express();
+const server = http.createServer(app);
+
+// WebSocket server for real-time updates
+const wss = new WebSocket.Server({ server });
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
@@ -37,8 +44,6 @@ const config = {
 // Validate Twilio credentials
 if (!config.twilio.accountSid || !config.twilio.authToken || !config.twilio.phoneNumber) {
     console.error('❌ ERROR: Twilio credentials not configured!');
-    console.error('   Set these environment variables:');
-    console.error('   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER');
 } else {
     console.log('✅ Twilio CONFIGURED ✓');
     console.log('   Phone:', config.twilio.phoneNumber);
@@ -61,7 +66,70 @@ try {
 const activeCalls = new Map();
 
 // ---------------------------------------------------------
-// API ENDPOINTS (Matching G-Studio Frontend)
+// WEBSOCKET MANAGEMENT
+// ---------------------------------------------------------
+const wsClients = new Set();
+
+wss.on('connection', (ws) => {
+    console.log('🔌 WebSocket client connected');
+    wsClients.add(ws);
+    
+    // Send welcome message
+    ws.send(JSON.stringify({ type: 'CONNECTED', message: 'Real-time updates enabled' }));
+    
+    // Handle ping/pong for keepalive
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message);
+            if (data.type === 'PING') {
+                ws.send(JSON.stringify({ type: 'PONG' }));
+            }
+            // Subscribe to specific call updates
+            if (data.type === 'SUBSCRIBE_CALL' && data.callSid) {
+                ws.subscribedCallSid = data.callSid;
+                console.log('📡 Client subscribed to call:', data.callSid);
+            }
+        } catch (e) {
+            // Ignore invalid messages
+        }
+    });
+    
+    ws.on('close', () => {
+        console.log('🔌 WebSocket client disconnected');
+        wsClients.delete(ws);
+    });
+    
+    ws.on('error', (err) => {
+        console.error('WebSocket error:', err.message);
+        wsClients.delete(ws);
+    });
+});
+
+// Broadcast call status to all connected clients
+function broadcastCallStatus(callSid, status, duration, recordingUrl) {
+    const message = JSON.stringify({
+        type: 'CALL_STATUS_UPDATE',
+        callSid,
+        status,
+        duration,
+        recordingUrl,
+        timestamp: Date.now()
+    });
+    
+    console.log(`📢 Broadcasting to ${wsClients.size} clients:`, status);
+    
+    wsClients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            // Send to all clients or only subscribed ones
+            if (!client.subscribedCallSid || client.subscribedCallSid === callSid) {
+                client.send(message);
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------
+// API ENDPOINTS
 // ---------------------------------------------------------
 
 // POST /make-call - Initiate a call
@@ -105,6 +173,9 @@ app.post('/make-call', async (req, res) => {
         });
         
         console.log('✅ Call created - SID:', call.sid);
+        
+        // Broadcast call initiated
+        broadcastCallStatus(call.sid, 'initiated', 0, null);
         
         res.json({
             success: true,
@@ -150,19 +221,7 @@ app.get('/call-status/:sid', async (req, res) => {
     
     try {
         const call = await twilioClient.calls(sid).fetch();
-        
-        const statusMap = {
-            'queued': 'queued',
-            'ringing': 'ringing',
-            'in-progress': 'in-progress',
-            'completed': 'completed',
-            'busy': 'busy',
-            'no-answer': 'no-answer',
-            'canceled': 'canceled',
-            'failed': 'failed'
-        };
-        
-        const status = statusMap[call.status] || call.status;
+        const status = call.status;
         const duration = parseInt(call.duration) || 0;
         
         console.log('📊 Twilio status:', sid.substring(0, 10) + '...', '→', status);
@@ -197,24 +256,27 @@ app.post('/hangup-call', async (req, res) => {
     }
     
     if (!twilioClient) {
-        // Clean up local state
         if (cachedCall) {
             cachedCall.status = 'completed';
             cachedCall.duration = duration;
         }
+        // Broadcast even without Twilio
+        broadcastCallStatus(sid, 'completed', duration, null);
         return res.json({ success: true, status: 'completed', duration });
     }
     
     try {
         await twilioClient.calls(sid).update({ status: 'completed' });
         
-        // Update local cache
         if (cachedCall) {
             cachedCall.status = 'completed';
             cachedCall.duration = duration;
         }
         
         console.log('✅ Call terminated, duration:', duration, 's');
+        
+        // Broadcast call ended
+        broadcastCallStatus(sid, 'completed', duration, cachedCall?.recordingUrl || null);
         
         res.json({
             success: true,
@@ -225,8 +287,8 @@ app.post('/hangup-call', async (req, res) => {
         
     } catch (error) {
         console.error('❌ Hangup error:', error.message);
-        // Still return success if call already ended
         if (error.code === 20404) {
+            broadcastCallStatus(sid, 'completed', duration, null);
             return res.json({ success: true, status: 'completed', duration });
         }
         res.status(500).json({ success: false, error: error.message });
@@ -240,7 +302,7 @@ app.post('/webhooks/call-status', (req, res) => {
     const { CallSid, CallStatus, CallDuration, RecordingUrl } = req.body;
     
     console.log('\n' + '='.repeat(50));
-    console.log('📡 WEBHOOK RECEIVED');
+    console.log('📡 TWILIO WEBHOOK RECEIVED');
     console.log('   SID:', CallSid);
     console.log('   Status:', CallStatus);
     console.log('   Duration:', CallDuration || 0);
@@ -248,6 +310,8 @@ app.post('/webhooks/call-status', (req, res) => {
     
     // Update our local cache
     const cachedCall = activeCalls.get(CallSid);
+    let duration = parseInt(CallDuration) || 0;
+    
     if (cachedCall) {
         cachedCall.status = CallStatus;
         
@@ -256,7 +320,10 @@ app.post('/webhooks/call-status', (req, res) => {
         }
         
         if (CallDuration) {
-            cachedCall.duration = parseInt(CallDuration);
+            cachedCall.duration = duration;
+        } else if (cachedCall.answeredTime) {
+            duration = Math.floor((Date.now() - cachedCall.answeredTime) / 1000);
+            cachedCall.duration = duration;
         }
         
         if (RecordingUrl) {
@@ -269,6 +336,9 @@ app.post('/webhooks/call-status', (req, res) => {
         }
     }
     
+    // 🚀 BROADCAST IMMEDIATELY to all connected WebSocket clients
+    broadcastCallStatus(CallSid, CallStatus, duration, RecordingUrl || cachedCall?.recordingUrl);
+    
     res.status(200).send('OK');
 });
 
@@ -280,6 +350,7 @@ app.get('/health', (req, res) => {
         status: 'online',
         twilio: twilioClient ? 'configured' : 'not configured',
         activeCalls: activeCalls.size,
+        wsClients: wsClients.size,
         timestamp: new Date().toISOString()
     });
 });
@@ -289,11 +360,12 @@ app.get('/health', (req, res) => {
 // ---------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log('\n' + '='.repeat(50));
-    console.log('🚀 QURAN ACADEMY SERVER');
+    console.log('🚀 QURAN ACADEMY SERVER (WebSocket Enabled)');
     console.log('='.repeat(50));
     console.log(`📡 Server: http://localhost:${PORT}`);
+    console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
     console.log(`🌐 Public URL: ${config.publicUrl}`);
     console.log('='.repeat(50) + '\n');
 });
