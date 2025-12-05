@@ -304,18 +304,18 @@
         ];
 
         const SAMPLE_CALL_HISTORY = [
-          { id: 101, studentName: 'Yusuf Ahmed', status: 'Completed', duration: 320, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
-          { id: 102, studentName: 'Aisha Khan', status: 'Failed', duration: 0, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null },
-          { id: 103, studentName: 'Omar Al-Farsi', status: 'Completed', duration: 450, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
-          { id: 104, studentName: 'Zainab Ali', status: 'Canceled', duration: 0, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null },
-          { id: 105, studentName: 'Bilal Ibrahim', status: 'Completed', duration: 280, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
-          { id: 106, studentName: 'Yusuf Ahmed', status: 'Completed', duration: 310, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
-          { id: 107, studentName: 'Aisha Khan', status: 'Completed', duration: 510, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null },
-          { id: 108, studentName: 'Omar Al-Farsi', status: 'Failed', duration: 0, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null },
-          { id: 109, studentName: 'Maryam Siddiqui', status: 'Completed', duration: 620, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
-          { id: 110, studentName: 'Dawud Hussein', status: 'Completed', duration: 180, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null },
-          { id: 111, studentName: 'Zainab Ali', status: 'Completed', duration: 400, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
-          { id: 112, studentName: 'Yusuf Ahmed', status: 'Completed', duration: 350, teacherName: 'Ali Hassan', timestamp: new Date().toISOString(), recordingUrl: null },
+          { id: 101, studentName: 'Yusuf Ahmed', status: 'Completed', duration: 320, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 102, studentName: 'Aisha Khan', status: 'Failed', duration: 0, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 103, studentName: 'Omar Al-Farsi', status: 'Completed', duration: 450, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 104, studentName: 'Zainab Ali', status: 'Canceled', duration: 0, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 105, studentName: 'Bilal Ibrahim', status: 'Completed', duration: 280, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 106, studentName: 'Yusuf Ahmed', status: 'Completed', duration: 310, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 107, studentName: 'Aisha Khan', status: 'Completed', duration: 510, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 108, studentName: 'Omar Al-Farsi', status: 'Failed', duration: 0, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 109, studentName: 'Maryam Siddiqui', status: 'Completed', duration: 620, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 110, studentName: 'Dawud Hussein', status: 'Completed', duration: 180, teacherName: 'Fatima Zahra', timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 111, studentName: 'Zainab Ali', status: 'Completed', duration: 400, teacherName: 'Ali Hassan', timestamp: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(), recordingUrl: null, callSid: null },
+          { id: 112, studentName: 'Yusuf Ahmed', status: 'Completed', duration: 350, teacherName: 'Ali Hassan', timestamp: new Date().toISOString(), recordingUrl: null, callSid: null },
         ];
 
 
@@ -760,8 +760,80 @@
             );
         };
 
-        const AudioPlayerModal = ({ isOpen, onClose, url, studentName }) => {
-            if (!isOpen || !url) return null;
+        const AudioPlayerModal = ({ isOpen, onClose, url, studentName, callSid }) => {
+            const [audioUrl, setAudioUrl] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const audioRef = useRef(null);
+            
+            // Reset state when modal opens/closes or when props change
+            useEffect(() => {
+                if (!isOpen) {
+                    setAudioUrl(null);
+                    setError(null);
+                    setLoading(false);
+                    return;
+                }
+                
+                // If we have a direct URL, use it (but proxy Twilio URLs)
+                if (url) {
+                    // Check if it's a Twilio URL that needs proxying
+                    if (url.includes('api.twilio.com') || url.includes('twilio.com')) {
+                        // Use our proxy endpoint
+                        if (callSid) {
+                            setLoading(true);
+                            setError(null);
+                            fetch(`${BACKEND_URL}/recording/${callSid}`)
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success && data.recordingUrl) {
+                                        // Use proxy URL
+                                        setAudioUrl(`${BACKEND_URL}/recording-audio/${callSid}`);
+                                    } else {
+                                        setError('Recording not available yet.');
+                                    }
+                                })
+                                .catch(() => setError('Failed to load recording.'))
+                                .finally(() => setLoading(false));
+                        } else {
+                            setError('Cannot load recording without call ID.');
+                        }
+                    } else {
+                        // Direct URL (sample data or other sources)
+                        setAudioUrl(url);
+                        setError(null);
+                    }
+                } else if (callSid) {
+                    // No URL but we have callSid - fetch from server
+                    setLoading(true);
+                    setError(null);
+                    
+                    fetch(`${BACKEND_URL}/recording/${callSid}`)
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success && data.recordingUrl) {
+                                // Use proxy URL for Twilio recordings
+                                setAudioUrl(`${BACKEND_URL}/recording-audio/${callSid}`);
+                            } else {
+                                setError('Recording not available yet. It may take a few moments to process.');
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Error fetching recording:', err);
+                            setError('Failed to load recording.');
+                        })
+                        .finally(() => setLoading(false));
+                } else {
+                    setError('No recording available for this call.');
+                }
+            }, [isOpen, url, callSid]);
+            
+            const handleAudioError = () => {
+                console.error('Audio playback error');
+                setError('Failed to play recording. The file may not be available or is still processing.');
+            };
+            
+            if (!isOpen) return null;
 
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -771,9 +843,55 @@
                             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-3xl leading-none">&times;</button>
                         </div>
                         <p className="text-sm text-slate-600 mb-4">Playing call recording for: <span className="font-semibold">{studentName}</span></p>
-                        <audio controls autoPlay src={url} className="w-full">
-                            Your browser does not support the audio element.
-                        </audio>
+                        
+                        {loading ? (
+                            <div className="flex items-center justify-center py-8">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
+                                <span className="ml-3 text-slate-600">Loading recording...</span>
+                            </div>
+                        ) : error ? (
+                            <div className="bg-red-50 text-red-700 p-4 rounded-lg text-center">
+                                <p>{error}</p>
+                                {callSid && (
+                                    <button 
+                                        onClick={() => {
+                                            setError(null);
+                                            setLoading(true);
+                                            fetch(`${BACKEND_URL}/recording/${callSid}`)
+                                                .then(res => res.json())
+                                                .then(data => {
+                                                    if (data.success && data.recordingUrl) {
+                                                        setAudioUrl(`${BACKEND_URL}/recording-audio/${callSid}`);
+                                                        setError(null);
+                                                    } else {
+                                                        setError('Recording still not available.');
+                                                    }
+                                                })
+                                                .catch(() => setError('Failed to load recording.'))
+                                                .finally(() => setLoading(false));
+                                        }}
+                                        className="mt-3 px-4 py-2 bg-indigo-500 text-white rounded-lg text-sm hover:bg-indigo-600"
+                                    >
+                                        Try Again
+                                    </button>
+                                )}
+                            </div>
+                        ) : audioUrl ? (
+                            <audio 
+                                ref={audioRef}
+                                controls 
+                                autoPlay 
+                                src={audioUrl} 
+                                className="w-full" 
+                                onError={handleAudioError}
+                            >
+                                Your browser does not support the audio element.
+                            </audio>
+                        ) : (
+                            <div className="bg-amber-50 text-amber-700 p-4 rounded-lg text-center">
+                                No recording available for this call.
+                            </div>
+                        )}
                     </div>
                 </div>
             );
@@ -918,9 +1036,13 @@
                                             </div>
 
                                             <div className="flex-shrink-0">
-                                                {call.recordingUrl && user.type === 'admin' && (
+                                                {call.callSid && user.type === 'admin' && call.status.includes('Completed') && (
                                                     <button 
-                                                        onClick={() => setNowPlaying({ url: call.recordingUrl, studentName: call.studentName })}
+                                                        onClick={() => setNowPlaying({ 
+                                                            url: call.recordingUrl, 
+                                                            studentName: call.studentName,
+                                                            callSid: call.callSid 
+                                                        })}
                                                         className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white font-semibold rounded-lg text-sm hover:bg-indigo-600 transition-colors"
                                                     >
                                                         <Icons.Play className="w-4 h-4" />
@@ -967,6 +1089,7 @@
                         onClose={() => setNowPlaying(null)}
                         url={nowPlaying?.url || null}
                         studentName={nowPlaying?.studentName || null}
+                        callSid={nowPlaying?.callSid || null}
                     />
                 </div>
             );
@@ -1643,11 +1766,15 @@
                         break;
                 }
 
-                // Add to history
+                // Add to history with callSid for recording retrieval
                 addCallToHistory({
-                    studentName, status: historyStatus, duration: finalDuration,
-                    teacherName: user.name, timestamp: new Date().toISOString(),
-                    recordingUrl: user.type === 'admin' ? recordingUrl : null
+                    studentName, 
+                    status: historyStatus, 
+                    duration: finalDuration,
+                    teacherName: user.name, 
+                    timestamp: new Date().toISOString(),
+                    recordingUrl: user.type === 'admin' ? recordingUrl : null,
+                    callSid: callStateRef.current.sid // Store callSid for fetching recording later
                 });
                 
                 // Show toast notification
