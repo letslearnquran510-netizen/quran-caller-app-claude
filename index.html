@@ -118,6 +118,13 @@
                     </svg>
                 </IconWrapper>
             ),
+            Mail: ({ className }) => (
+                <IconWrapper className={className}>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                    </svg>
+                </IconWrapper>
+            ),
             Search: ({ className }) => (
                  <IconWrapper className={className}>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -1347,24 +1354,80 @@
 
 
         const App = () => {
+            // User stored locally for session, but validated against server
             const [currentUser, setCurrentUser] = useLocalStorage('quranAcademyUser', null);
-            const [students, setStudents] = useLocalStorage('quranAcademyStudents', []);
-            const [callHistory, setCallHistory] = useLocalStorage('quranAcademyCallHistory', []);
-            const [teachers, setTeachers] = useLocalStorage('quranAcademyTeachers', []);
+            
+            // Data loaded from database API
+            const [students, setStudents] = useState([]);
+            const [callHistory, setCallHistory] = useState([]);
+            const [teachers, setTeachers] = useState([]);
+            const [dataLoaded, setDataLoaded] = useState(false);
+            const [dbStatus, setDbStatus] = useState(null);
+            
             const [toasts, setToasts] = useState([]);
             const [confirmation, setConfirmation] = useState(null);
             const [prompt, setPrompt] = useState(null);
 
+            // Load all data from database on startup
             useEffect(() => {
-                const hasBeenSeeded = window.localStorage.getItem('quranAcademySeeded');
-                if (!hasBeenSeeded) {
-                    console.log("Seeding initial data for demo...");
-                    setStudents(SAMPLE_STUDENTS);
-                    setCallHistory(SAMPLE_CALL_HISTORY);
-                    setTeachers(SAMPLE_TEACHERS);
-                    window.localStorage.setItem('quranAcademySeeded', 'true');
-                }
-            }, [setStudents, setCallHistory, setTeachers]);
+                const loadData = async () => {
+                    console.log('📊 Loading data from database...');
+                    try {
+                        // Check database status
+                        const statusRes = await fetch(`${BACKEND_URL}/api/db-status`);
+                        const status = await statusRes.json();
+                        setDbStatus(status);
+                        console.log('   Database:', status.type);
+                        
+                        // Load students
+                        const studentsRes = await fetch(`${BACKEND_URL}/api/students`);
+                        const studentsData = await studentsRes.json();
+                        if (studentsData.success) {
+                            // Transform MongoDB _id to id for frontend compatibility
+                            const transformedStudents = studentsData.students.map(s => ({
+                                ...s,
+                                id: s._id || s.id,
+                                phone: s.phone
+                            }));
+                            setStudents(transformedStudents);
+                            console.log('   Students loaded:', transformedStudents.length);
+                        }
+                        
+                        // Load teachers
+                        const teachersRes = await fetch(`${BACKEND_URL}/api/teachers`);
+                        const teachersData = await teachersRes.json();
+                        if (teachersData.success) {
+                            const transformedTeachers = teachersData.teachers.map(t => ({
+                                ...t,
+                                id: t._id || t.id
+                            }));
+                            setTeachers(transformedTeachers);
+                            console.log('   Teachers loaded:', transformedTeachers.length);
+                        }
+                        
+                        // Load call history
+                        const historyRes = await fetch(`${BACKEND_URL}/api/call-history?limit=500`);
+                        const historyData = await historyRes.json();
+                        if (historyData.success) {
+                            const transformedHistory = historyData.history.map(h => ({
+                                ...h,
+                                id: h._id || h.id
+                            }));
+                            setCallHistory(transformedHistory);
+                            console.log('   Call history loaded:', transformedHistory.length);
+                        }
+                        
+                        setDataLoaded(true);
+                        console.log('✅ All data loaded from database');
+                        
+                    } catch (err) {
+                        console.error('❌ Error loading data:', err);
+                        setDataLoaded(true); // Still show UI even if load fails
+                    }
+                };
+                
+                loadData();
+            }, []);
 
             const addToast = useCallback((message, type = 'info') => {
                 setToasts(prev => [...prev, { id: Date.now(), message, type }]);
@@ -1382,6 +1445,160 @@
                 setCurrentUser(null);
                 addToast("You have been logged out.", 'info');
             };
+            
+            // API-backed student operations
+            const addStudent = async (studentData) => {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/students`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(studentData)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        const newStudent = { ...data.student, id: data.student._id || data.student.id };
+                        setStudents(prev => [newStudent, ...prev]);
+                        return { success: true, student: newStudent };
+                    }
+                    return { success: false, error: data.error };
+                } catch (err) {
+                    console.error('Add student error:', err);
+                    return { success: false, error: 'Failed to add student' };
+                }
+            };
+            
+            const updateStudent = async (id, studentData) => {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/students/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(studentData)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setStudents(prev => prev.map(s => 
+                            (s.id === id || s._id === id) ? { ...data.student, id: data.student._id || data.student.id } : s
+                        ));
+                        return { success: true };
+                    }
+                    return { success: false, error: data.error };
+                } catch (err) {
+                    console.error('Update student error:', err);
+                    return { success: false, error: 'Failed to update student' };
+                }
+            };
+            
+            const deleteStudent = async (id) => {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/students/${id}`, {
+                        method: 'DELETE'
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setStudents(prev => prev.filter(s => s.id !== id && s._id !== id));
+                        return { success: true };
+                    }
+                    return { success: false, error: data.error };
+                } catch (err) {
+                    console.error('Delete student error:', err);
+                    return { success: false, error: 'Failed to delete student' };
+                }
+            };
+            
+            // API-backed teacher operations
+            const addTeacher = async (teacherData) => {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/teachers`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(teacherData)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        const newTeacher = { ...data.teacher, id: data.teacher._id || data.teacher.id };
+                        setTeachers(prev => [newTeacher, ...prev]);
+                        return { success: true, teacher: newTeacher };
+                    }
+                    return { success: false, error: data.error };
+                } catch (err) {
+                    console.error('Add teacher error:', err);
+                    return { success: false, error: 'Failed to add teacher' };
+                }
+            };
+            
+            const updateTeacher = async (id, teacherData) => {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/teachers/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(teacherData)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setTeachers(prev => prev.map(t => 
+                            (t.id === id || t._id === id) ? { ...data.teacher, id: data.teacher._id || data.teacher.id } : t
+                        ));
+                        return { success: true };
+                    }
+                    return { success: false, error: data.error };
+                } catch (err) {
+                    console.error('Update teacher error:', err);
+                    return { success: false, error: 'Failed to update teacher' };
+                }
+            };
+            
+            const deleteTeacher = async (id) => {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/teachers/${id}`, {
+                        method: 'DELETE'
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setTeachers(prev => prev.filter(t => t.id !== id && t._id !== id));
+                        return { success: true };
+                    }
+                    return { success: false, error: data.error };
+                } catch (err) {
+                    console.error('Delete teacher error:', err);
+                    return { success: false, error: 'Failed to delete teacher' };
+                }
+            };
+            
+            // API-backed call history
+            const addCallToHistoryAPI = async (callData) => {
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/call-history`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(callData)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        const newCall = { ...data.call, id: data.call._id || data.call.id };
+                        setCallHistory(prev => [newCall, ...prev]);
+                        return { success: true };
+                    }
+                    return { success: false };
+                } catch (err) {
+                    console.error('Add call history error:', err);
+                    // Still add locally even if API fails
+                    setCallHistory(prev => [{ ...callData, id: Date.now() }, ...prev]);
+                    return { success: false };
+                }
+            };
+
+            // Show loading screen while data loads
+            if (!dataLoaded) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-4"></div>
+                            <p className="text-white text-xl">Loading Quran Academy...</p>
+                            <p className="text-purple-300 text-sm mt-2">Connecting to database</p>
+                        </div>
+                    </div>
+                );
+            }
 
             if (!currentUser) {
                 return (
@@ -1406,6 +1623,14 @@
                         addToast={addToast}
                         setConfirmation={setConfirmation}
                         setPrompt={setPrompt}
+                        dbStatus={dbStatus}
+                        addStudent={addStudent}
+                        updateStudent={updateStudent}
+                        deleteStudent={deleteStudent}
+                        addTeacher={addTeacher}
+                        updateTeacher={updateTeacher}
+                        deleteTeacher={deleteTeacher}
+                        addCallToHistoryAPI={addCallToHistoryAPI}
                     />
                     <ToastContainer toasts={toasts} dismissToast={dismissToast} />
                     <ConfirmationModal 
@@ -1426,30 +1651,91 @@
         // --- Login Screen Component ---
         const LoginScreen = ({ onLogin, addToast }) => {
             const [activeTab, setActiveTab] = useState('admin');
+            const [adminEmail, setAdminEmail] = useState('admin@quranacademy.com');
             const [adminPassword, setAdminPassword] = useState('');
-            const [teacherName, setTeacherName] = useState('');
+            const [teacherEmail, setTeacherEmail] = useState('');
             const [teacherPassword, setTeacherPassword] = useState('');
             const [isAdminPasswordVisible, setIsAdminPasswordVisible] = useState(false);
             const [isTeacherPasswordVisible, setIsTeacherPasswordVisible] = useState(false);
+            const [isLoading, setIsLoading] = useState(false);
 
-            const handleAdminLogin = () => {
-                if (adminPassword === ADMIN_PASSWORD) {
-                    onLogin({ type: 'admin', name: 'Administrator' });
-                } else {
-                    addToast('Incorrect admin password!', 'error');
-                }
-            };
-            
-            const handleStaffLogin = () => {
-                if (!teacherName.trim()) {
-                    addToast('Please enter your name!', 'error');
+            const handleAdminLogin = async () => {
+                if (!adminPassword) {
+                    addToast('Please enter password!', 'error');
                     return;
                 }
-                if (teacherPassword === STAFF_PASSWORD) {
-                    onLogin({ type: 'staff', name: teacherName.trim() });
-                } else {
-                    addToast('Incorrect staff password!', 'error');
+                
+                setIsLoading(true);
+                try {
+                    // Try API login first
+                    const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            email: adminEmail, 
+                            password: adminPassword, 
+                            type: 'admin' 
+                        })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        onLogin(data.user);
+                        addToast('Welcome back, Administrator!', 'success');
+                    } else {
+                        // Fallback to old password check
+                        if (adminPassword === ADMIN_PASSWORD) {
+                            onLogin({ type: 'admin', name: 'Administrator', email: adminEmail });
+                        } else {
+                            addToast(data.error || 'Incorrect password!', 'error');
+                        }
+                    }
+                } catch (err) {
+                    console.error('Login error:', err);
+                    // Fallback to old password check if API unavailable
+                    if (adminPassword === ADMIN_PASSWORD) {
+                        onLogin({ type: 'admin', name: 'Administrator', email: adminEmail });
+                    } else {
+                        addToast('Incorrect password!', 'error');
+                    }
                 }
+                setIsLoading(false);
+            };
+            
+            const handleTeacherLogin = async () => {
+                if (!teacherEmail.trim()) {
+                    addToast('Please enter your email!', 'error');
+                    return;
+                }
+                if (!teacherPassword) {
+                    addToast('Please enter password!', 'error');
+                    return;
+                }
+                
+                setIsLoading(true);
+                try {
+                    const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            email: teacherEmail, 
+                            password: teacherPassword, 
+                            type: 'teacher' 
+                        })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        onLogin(data.user);
+                        addToast(`Welcome back, ${data.user.name}!`, 'success');
+                    } else {
+                        addToast(data.error || 'Invalid credentials!', 'error');
+                    }
+                } catch (err) {
+                    console.error('Login error:', err);
+                    addToast('Login failed. Please try again.', 'error');
+                }
+                setIsLoading(false);
             };
 
             return (
@@ -1465,38 +1751,47 @@
                         
                         <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-xl mb-6">
                             <button onClick={() => setActiveTab('admin')} className={`px-4 py-3 text-sm font-bold rounded-lg transition-colors ${activeTab === 'admin' ? 'bg-white shadow text-indigo-600' : 'text-slate-600'}`}>Administrator</button>
-                            <button onClick={() => setActiveTab('staff')} className={`px-4 py-3 text-sm font-bold rounded-lg transition-colors ${activeTab === 'staff' ? 'bg-white shadow text-indigo-600' : 'text-slate-600'}`}>Teacher</button>
+                            <button onClick={() => setActiveTab('teacher')} className={`px-4 py-3 text-sm font-bold rounded-lg transition-colors ${activeTab === 'teacher' ? 'bg-white shadow text-indigo-600' : 'text-slate-600'}`}>Teacher</button>
                         </div>
 
                         {activeTab === 'admin' ? (
                             <div className="space-y-4">
                                 <div>
-                                    <label className="text-sm font-medium text-slate-600 mb-1 block flex items-center gap-2"><Icons.LockClosed className="w-4 h-4"/> Admin Password</label>
+                                    <label className="text-sm font-medium text-slate-600 mb-1 block flex items-center gap-2"><Icons.Mail className="w-4 h-4"/> Email</label>
+                                    <input type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="admin@quranacademy.com"/>
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-slate-600 mb-1 block flex items-center gap-2"><Icons.LockClosed className="w-4 h-4"/> Password</label>
                                     <div className="relative">
-                                        <input type={isAdminPasswordVisible ? 'text' : 'password'} value={adminPassword} onChange={e => setAdminPassword(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAdminLogin()} className="w-full p-3 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="Enter admin password"/>
+                                        <input type={isAdminPasswordVisible ? 'text' : 'password'} value={adminPassword} onChange={e => setAdminPassword(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAdminLogin()} className="w-full p-3 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="Enter password"/>
                                         <button type="button" onClick={() => setIsAdminPasswordVisible(prev => !prev)} className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600">
                                             {isAdminPasswordVisible ? <Icons.EyeSlash className="w-5 h-5"/> : <Icons.Eye className="w-5 h-5"/>}
                                         </button>
                                     </div>
                                 </div>
-                                <button onClick={handleAdminLogin} className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-opacity">Login as Administrator</button>
+                                <button onClick={handleAdminLogin} disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+                                    {isLoading ? <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> Logging in...</> : 'Login as Administrator'}
+                                </button>
                             </div>
                         ) : (
                             <div className="space-y-4">
                                 <div>
-                                     <label className="text-sm font-medium text-slate-600 mb-1 block flex items-center gap-2"><Icons.User className="w-4 h-4"/> Teacher Name</label>
-                                     <input type="text" value={teacherName} onChange={e => setTeacherName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="Enter your full name"/>
+                                     <label className="text-sm font-medium text-slate-600 mb-1 block flex items-center gap-2"><Icons.Mail className="w-4 h-4"/> Email</label>
+                                     <input type="email" value={teacherEmail} onChange={e => setTeacherEmail(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="teacher@example.com"/>
                                 </div>
                                 <div>
                                     <label className="text-sm font-medium text-slate-600 mb-1 block flex items-center gap-2"><Icons.LockClosed className="w-4 h-4"/> Password</label>
                                     <div className="relative">
-                                        <input type={isTeacherPasswordVisible ? 'text' : 'password'} value={teacherPassword} onChange={e => setTeacherPassword(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleStaffLogin()} className="w-full p-3 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="Enter password"/>
+                                        <input type={isTeacherPasswordVisible ? 'text' : 'password'} value={teacherPassword} onChange={e => setTeacherPassword(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleTeacherLogin()} className="w-full p-3 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="Enter password"/>
                                         <button type="button" onClick={() => setIsTeacherPasswordVisible(prev => !prev)} className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600">
                                             {isTeacherPasswordVisible ? <Icons.EyeSlash className="w-5 h-5"/> : <Icons.Eye className="w-5 h-5"/>}
                                         </button>
                                     </div>
                                 </div>
-                                <button onClick={handleStaffLogin} className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-opacity">Login as Teacher</button>
+                                <button onClick={handleTeacherLogin} disabled={isLoading} className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+                                    {isLoading ? <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> Logging in...</> : 'Login as Teacher'}
+                                </button>
+                                <p className="text-xs text-slate-400 text-center">Teachers must be added by admin first</p>
                             </div>
                         )}
                     </div>
