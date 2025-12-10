@@ -1,6 +1,6 @@
 // ========================================
 // QURAN ACADEMY CALLING SERVER
-// With WebSocket Real-Time Updates
+// With MongoDB Database & WebSocket
 // ========================================
 
 const express = require('express');
@@ -10,6 +10,8 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const WebSocket = require('ws');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const app = express();
@@ -40,9 +42,112 @@ const config = {
         phoneNumber: (process.env.TWILIO_PHONE_NUMBER || '').trim(),
     },
     publicUrl: (process.env.PUBLIC_URL || 'http://localhost:3000').trim(),
+    mongoUri: process.env.MONGODB_URI || '',
 };
 
-// Validate Twilio credentials
+// ---------------------------------------------------------
+// MONGODB CONNECTION
+// ---------------------------------------------------------
+let dbConnected = false;
+
+if (config.mongoUri) {
+    mongoose.connect(config.mongoUri)
+        .then(() => {
+            console.log('✅ MongoDB CONNECTED ✓');
+            dbConnected = true;
+            initializeAdmin();
+        })
+        .catch(err => {
+            console.error('❌ MongoDB connection error:', err.message);
+        });
+} else {
+    console.log('⚠️ MongoDB URI not configured - using in-memory storage');
+    console.log('   Add MONGODB_URI environment variable for permanent storage');
+}
+
+// ---------------------------------------------------------
+// DATABASE SCHEMAS
+// ---------------------------------------------------------
+
+// User Schema (Admin & Teachers)
+const userSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true, lowercase: true },
+    password: { type: String, required: true },
+    type: { type: String, enum: ['admin', 'teacher'], default: 'teacher' },
+    phone: { type: String },
+    isActive: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now },
+    lastLogin: { type: Date }
+});
+
+// Student Schema
+const studentSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    phone: { type: String, required: true },
+    email: { type: String },
+    notes: { type: String },
+    course: { type: String },
+    status: { type: String, enum: ['active', 'inactive', 'completed'], default: 'active' },
+    addedBy: { type: String },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+});
+
+// Call History Schema
+const callHistorySchema = new mongoose.Schema({
+    studentName: { type: String, required: true },
+    studentPhone: { type: String },
+    teacherName: { type: String, required: true },
+    teacherId: { type: String },
+    status: { type: String, required: true },
+    duration: { type: Number, default: 0 },
+    callSid: { type: String },
+    recordingUrl: { type: String },
+    notes: { type: String },
+    timestamp: { type: Date, default: Date.now }
+});
+
+// Create models
+const User = mongoose.model('User', userSchema);
+const Student = mongoose.model('Student', studentSchema);
+const CallHistory = mongoose.model('CallHistory', callHistorySchema);
+
+// Initialize default admin account
+async function initializeAdmin() {
+    try {
+        const adminExists = await User.findOne({ type: 'admin' });
+        if (!adminExists) {
+            const hashedPassword = await bcrypt.hash('Quran@123', 10);
+            await User.create({
+                name: 'Administrator',
+                email: 'admin@quranacademy.com',
+                password: hashedPassword,
+                type: 'admin'
+            });
+            console.log('✅ Default admin account created');
+            console.log('   Email: admin@quranacademy.com');
+            console.log('   Password: Quran@123');
+        }
+    } catch (err) {
+        console.error('Error creating admin:', err.message);
+    }
+}
+
+// ---------------------------------------------------------
+// IN-MEMORY STORAGE (Fallback & Call Tracking)
+// ---------------------------------------------------------
+const activeCalls = new Map();
+const recordingsMap = new Map();
+
+// In-memory fallback if MongoDB not connected
+let inMemoryStudents = [];
+let inMemoryTeachers = [];
+let inMemoryCallHistory = [];
+
+// ---------------------------------------------------------
+// TWILIO CONFIGURATION
+// ---------------------------------------------------------
 if (!config.twilio.accountSid || !config.twilio.authToken || !config.twilio.phoneNumber) {
     console.error('❌ ERROR: Twilio credentials not configured!');
 } else {
@@ -50,7 +155,6 @@ if (!config.twilio.accountSid || !config.twilio.authToken || !config.twilio.phon
     console.log('   Phone:', config.twilio.phoneNumber);
 }
 
-// Initialize Twilio client
 let twilioClient = null;
 try {
     if (config.twilio.accountSid && config.twilio.authToken) {
@@ -62,12 +166,6 @@ try {
 }
 
 // ---------------------------------------------------------
-// IN-MEMORY CALL STORAGE
-// ---------------------------------------------------------
-const activeCalls = new Map();
-const recordingsMap = new Map(); // Store recordings separately for history lookups
-
-// ---------------------------------------------------------
 // WEBSOCKET MANAGEMENT
 // ---------------------------------------------------------
 const wsClients = new Set();
@@ -76,38 +174,32 @@ wss.on('connection', (ws) => {
     console.log('🔌 WebSocket client connected');
     wsClients.add(ws);
     
-    // Send welcome message
     ws.send(JSON.stringify({ type: 'CONNECTED', message: 'Real-time updates enabled' }));
     
-    // Handle ping/pong for keepalive
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
             if (data.type === 'PING') {
                 ws.send(JSON.stringify({ type: 'PONG' }));
-            }
-            // Subscribe to specific call updates
-            if (data.type === 'SUBSCRIBE_CALL' && data.callSid) {
+            } else if (data.type === 'SUBSCRIBE_CALL') {
                 ws.subscribedCallSid = data.callSid;
-                console.log('📡 Client subscribed to call:', data.callSid);
             }
         } catch (e) {
-            // Ignore invalid messages
+            console.error('WS message error:', e);
         }
     });
     
     ws.on('close', () => {
-        console.log('🔌 WebSocket client disconnected');
         wsClients.delete(ws);
+        console.log('🔌 WebSocket client disconnected');
     });
     
     ws.on('error', (err) => {
-        console.error('WebSocket error:', err.message);
+        console.error('WS error:', err.message);
         wsClients.delete(ws);
     });
 });
 
-// Broadcast call status to all connected clients
 function broadcastCallStatus(callSid, status, duration, recordingUrl) {
     const message = JSON.stringify({
         type: 'CALL_STATUS_UPDATE',
@@ -118,11 +210,8 @@ function broadcastCallStatus(callSid, status, duration, recordingUrl) {
         timestamp: Date.now()
     });
     
-    console.log(`📢 Broadcasting to ${wsClients.size} clients:`, status);
-    
     wsClients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
-            // Send to all clients or only subscribed ones
             if (!client.subscribedCallSid || client.subscribedCallSid === callSid) {
                 client.send(message);
             }
@@ -130,19 +219,392 @@ function broadcastCallStatus(callSid, status, duration, recordingUrl) {
     });
 }
 
+// ==========================================================
+// DATABASE API ENDPOINTS
+// ==========================================================
+
 // ---------------------------------------------------------
-// API ENDPOINTS
+// AUTHENTICATION
+// ---------------------------------------------------------
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password, type } = req.body;
+    
+    console.log('🔐 Login attempt:', email, 'type:', type);
+    
+    try {
+        if (dbConnected) {
+            // Check database
+            const user = await User.findOne({ 
+                email: email.toLowerCase(),
+                type: type 
+            });
+            
+            if (!user) {
+                return res.status(401).json({ success: false, error: 'Invalid credentials' });
+            }
+            
+            const validPassword = await bcrypt.compare(password, user.password);
+            if (!validPassword) {
+                return res.status(401).json({ success: false, error: 'Invalid credentials' });
+            }
+            
+            // Update last login
+            user.lastLogin = new Date();
+            await user.save();
+            
+            console.log('✅ Login successful:', user.name);
+            
+            return res.json({
+                success: true,
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    type: user.type
+                }
+            });
+        } else {
+            // Fallback: hardcoded admin
+            if (type === 'admin' && email === 'admin@quranacademy.com' && password === 'Quran@123') {
+                return res.json({
+                    success: true,
+                    user: { id: 'admin-1', name: 'Administrator', email: email, type: 'admin' }
+                });
+            }
+            
+            // Check in-memory teachers
+            const teacher = inMemoryTeachers.find(t => 
+                t.email.toLowerCase() === email.toLowerCase() && t.password === password
+            );
+            if (teacher && type === 'teacher') {
+                return res.json({
+                    success: true,
+                    user: { id: teacher.id, name: teacher.name, email: teacher.email, type: 'teacher' }
+                });
+            }
+            
+            return res.status(401).json({ success: false, error: 'Invalid credentials' });
+        }
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+// ---------------------------------------------------------
+// STUDENTS API
 // ---------------------------------------------------------
 
-// POST /make-call - Initiate a call
+// Get all students
+app.get('/api/students', async (req, res) => {
+    try {
+        if (dbConnected) {
+            const students = await Student.find({ status: { $ne: 'deleted' } }).sort({ createdAt: -1 });
+            return res.json({ success: true, students });
+        } else {
+            return res.json({ success: true, students: inMemoryStudents });
+        }
+    } catch (err) {
+        console.error('Get students error:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch students' });
+    }
+});
+
+// Add new student
+app.post('/api/students', async (req, res) => {
+    const { name, phone, email, notes, course, addedBy } = req.body;
+    
+    console.log('➕ Adding student:', name, phone);
+    
+    if (!name || !phone) {
+        return res.status(400).json({ success: false, error: 'Name and phone required' });
+    }
+    
+    try {
+        if (dbConnected) {
+            const student = await Student.create({
+                name, phone, email, notes, course, addedBy
+            });
+            console.log('✅ Student added to database:', student._id);
+            return res.json({ success: true, student });
+        } else {
+            const student = {
+                id: Date.now().toString(),
+                name, phone, email, notes, course, addedBy,
+                createdAt: new Date()
+            };
+            inMemoryStudents.push(student);
+            return res.json({ success: true, student });
+        }
+    } catch (err) {
+        console.error('Add student error:', err);
+        res.status(500).json({ success: false, error: 'Failed to add student' });
+    }
+});
+
+// Update student
+app.put('/api/students/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, phone, email, notes, course, status } = req.body;
+    
+    console.log('✏️ Updating student:', id);
+    
+    try {
+        if (dbConnected) {
+            const student = await Student.findByIdAndUpdate(
+                id,
+                { name, phone, email, notes, course, status, updatedAt: new Date() },
+                { new: true }
+            );
+            if (!student) {
+                return res.status(404).json({ success: false, error: 'Student not found' });
+            }
+            return res.json({ success: true, student });
+        } else {
+            const index = inMemoryStudents.findIndex(s => s.id === id);
+            if (index === -1) {
+                return res.status(404).json({ success: false, error: 'Student not found' });
+            }
+            inMemoryStudents[index] = { ...inMemoryStudents[index], name, phone, email, notes, course, status };
+            return res.json({ success: true, student: inMemoryStudents[index] });
+        }
+    } catch (err) {
+        console.error('Update student error:', err);
+        res.status(500).json({ success: false, error: 'Failed to update student' });
+    }
+});
+
+// Delete student
+app.delete('/api/students/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    console.log('🗑️ Deleting student:', id);
+    
+    try {
+        if (dbConnected) {
+            await Student.findByIdAndDelete(id);
+            return res.json({ success: true });
+        } else {
+            inMemoryStudents = inMemoryStudents.filter(s => s.id !== id);
+            return res.json({ success: true });
+        }
+    } catch (err) {
+        console.error('Delete student error:', err);
+        res.status(500).json({ success: false, error: 'Failed to delete student' });
+    }
+});
+
+// ---------------------------------------------------------
+// TEACHERS/USERS API
+// ---------------------------------------------------------
+
+// Get all teachers
+app.get('/api/teachers', async (req, res) => {
+    try {
+        if (dbConnected) {
+            const teachers = await User.find({ type: 'teacher', isActive: true })
+                .select('-password')
+                .sort({ createdAt: -1 });
+            return res.json({ success: true, teachers });
+        } else {
+            const teachers = inMemoryTeachers.map(({ password, ...t }) => t);
+            return res.json({ success: true, teachers });
+        }
+    } catch (err) {
+        console.error('Get teachers error:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch teachers' });
+    }
+});
+
+// Add new teacher
+app.post('/api/teachers', async (req, res) => {
+    const { name, email, password, phone } = req.body;
+    
+    console.log('➕ Adding teacher:', name, email);
+    
+    if (!name || !email || !password) {
+        return res.status(400).json({ success: false, error: 'Name, email and password required' });
+    }
+    
+    try {
+        if (dbConnected) {
+            // Check if email exists
+            const exists = await User.findOne({ email: email.toLowerCase() });
+            if (exists) {
+                return res.status(400).json({ success: false, error: 'Email already exists' });
+            }
+            
+            const hashedPassword = await bcrypt.hash(password, 10);
+            const teacher = await User.create({
+                name, 
+                email: email.toLowerCase(), 
+                password: hashedPassword, 
+                phone,
+                type: 'teacher'
+            });
+            
+            console.log('✅ Teacher added to database:', teacher._id);
+            
+            return res.json({ 
+                success: true, 
+                teacher: { id: teacher._id, name, email, phone, type: 'teacher' }
+            });
+        } else {
+            const teacher = {
+                id: Date.now().toString(),
+                name, email, password, phone, type: 'teacher',
+                createdAt: new Date()
+            };
+            inMemoryTeachers.push(teacher);
+            const { password: _, ...teacherWithoutPassword } = teacher;
+            return res.json({ success: true, teacher: teacherWithoutPassword });
+        }
+    } catch (err) {
+        console.error('Add teacher error:', err);
+        res.status(500).json({ success: false, error: 'Failed to add teacher' });
+    }
+});
+
+// Update teacher
+app.put('/api/teachers/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, email, password, phone } = req.body;
+    
+    console.log('✏️ Updating teacher:', id);
+    
+    try {
+        if (dbConnected) {
+            const updateData = { name, email: email.toLowerCase(), phone };
+            if (password) {
+                updateData.password = await bcrypt.hash(password, 10);
+            }
+            
+            const teacher = await User.findByIdAndUpdate(id, updateData, { new: true }).select('-password');
+            if (!teacher) {
+                return res.status(404).json({ success: false, error: 'Teacher not found' });
+            }
+            return res.json({ success: true, teacher });
+        } else {
+            const index = inMemoryTeachers.findIndex(t => t.id === id);
+            if (index === -1) {
+                return res.status(404).json({ success: false, error: 'Teacher not found' });
+            }
+            inMemoryTeachers[index] = { ...inMemoryTeachers[index], name, email, phone };
+            if (password) inMemoryTeachers[index].password = password;
+            const { password: _, ...teacherWithoutPassword } = inMemoryTeachers[index];
+            return res.json({ success: true, teacher: teacherWithoutPassword });
+        }
+    } catch (err) {
+        console.error('Update teacher error:', err);
+        res.status(500).json({ success: false, error: 'Failed to update teacher' });
+    }
+});
+
+// Delete teacher
+app.delete('/api/teachers/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    console.log('🗑️ Deleting teacher:', id);
+    
+    try {
+        if (dbConnected) {
+            await User.findByIdAndDelete(id);
+            return res.json({ success: true });
+        } else {
+            inMemoryTeachers = inMemoryTeachers.filter(t => t.id !== id);
+            return res.json({ success: true });
+        }
+    } catch (err) {
+        console.error('Delete teacher error:', err);
+        res.status(500).json({ success: false, error: 'Failed to delete teacher' });
+    }
+});
+
+// ---------------------------------------------------------
+// CALL HISTORY API
+// ---------------------------------------------------------
+
+// Get call history
+app.get('/api/call-history', async (req, res) => {
+    const { limit = 500, teacherId } = req.query;
+    
+    try {
+        if (dbConnected) {
+            let query = {};
+            if (teacherId) query.teacherId = teacherId;
+            
+            const history = await CallHistory.find(query)
+                .sort({ timestamp: -1 })
+                .limit(parseInt(limit));
+            return res.json({ success: true, history });
+        } else {
+            let history = inMemoryCallHistory;
+            if (teacherId) {
+                history = history.filter(h => h.teacherId === teacherId);
+            }
+            return res.json({ success: true, history: history.slice(0, parseInt(limit)) });
+        }
+    } catch (err) {
+        console.error('Get call history error:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch call history' });
+    }
+});
+
+// Add call to history
+app.post('/api/call-history', async (req, res) => {
+    const { studentName, studentPhone, teacherName, teacherId, status, duration, callSid, recordingUrl, notes } = req.body;
+    
+    console.log('📝 Adding call to history:', studentName, status);
+    
+    try {
+        if (dbConnected) {
+            const call = await CallHistory.create({
+                studentName, studentPhone, teacherName, teacherId, 
+                status, duration, callSid, recordingUrl, notes
+            });
+            console.log('✅ Call history saved to database');
+            return res.json({ success: true, call });
+        } else {
+            const call = {
+                id: Date.now().toString(),
+                studentName, studentPhone, teacherName, teacherId,
+                status, duration, callSid, recordingUrl, notes,
+                timestamp: new Date()
+            };
+            inMemoryCallHistory.unshift(call);
+            return res.json({ success: true, call });
+        }
+    } catch (err) {
+        console.error('Add call history error:', err);
+        res.status(500).json({ success: false, error: 'Failed to save call history' });
+    }
+});
+
+// ---------------------------------------------------------
+// DATABASE STATUS
+// ---------------------------------------------------------
+app.get('/api/db-status', (req, res) => {
+    res.json({
+        connected: dbConnected,
+        type: dbConnected ? 'MongoDB Atlas' : 'In-Memory (temporary)',
+        message: dbConnected 
+            ? 'All data is permanently saved' 
+            : 'Data will be lost on server restart. Add MONGODB_URI for permanent storage.'
+    });
+});
+
+// ==========================================================
+// TWILIO CALLING ENDPOINTS
+// ==========================================================
+
+// POST /make-call - Initiate a phone call
 app.post('/make-call', async (req, res) => {
-    const { to, name, record } = req.body;
+    const { to, name } = req.body;
     
     console.log('\n' + '='.repeat(50));
     console.log('📞 INITIATING CALL');
     console.log('   To:', to);
     console.log('   Name:', name);
-    console.log('   Record:', record);
     console.log('='.repeat(50));
     
     if (!to) {
@@ -158,7 +620,7 @@ app.post('/make-call', async (req, res) => {
             url: `${config.publicUrl}/twiml/outbound`,
             to: to,
             from: config.twilio.phoneNumber,
-            record: true, // Always record calls
+            record: true,
             recordingStatusCallback: `${config.publicUrl}/webhooks/recording-status`,
             recordingStatusCallbackEvent: ['completed'],
             statusCallback: `${config.publicUrl}/webhooks/call-status`,
@@ -166,7 +628,6 @@ app.post('/make-call', async (req, res) => {
             statusCallbackMethod: 'POST'
         });
         
-        // Store call info
         activeCalls.set(call.sid, {
             sid: call.sid,
             to: to,
@@ -179,8 +640,6 @@ app.post('/make-call', async (req, res) => {
         });
         
         console.log('✅ Call created - SID:', call.sid);
-        
-        // Broadcast call initiated
         broadcastCallStatus(call.sid, 'initiated', 0, null);
         
         res.json({
@@ -191,28 +650,20 @@ app.post('/make-call', async (req, res) => {
         
     } catch (error) {
         console.error('❌ Twilio Error:', error.message);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// GET /call-status/:sid - Get call status
-// ALWAYS checks Twilio directly for active calls to catch hangups immediately
+// GET /call-status/:sid - Get real-time call status
 app.get('/call-status/:sid', async (req, res) => {
     const { sid } = req.params;
-    
     const cachedCall = activeCalls.get(sid);
     
-    // For active/in-progress calls, ALWAYS check Twilio directly
-    // This catches hangups faster than waiting for webhooks
-    if (twilioClient && cachedCall && (cachedCall.status === 'in-progress' || cachedCall.status === 'ringing' || cachedCall.status === 'queued' || cachedCall.status === 'initiated')) {
+    if (twilioClient && cachedCall && ['in-progress', 'ringing', 'queued', 'initiated'].includes(cachedCall.status)) {
         try {
             const call = await twilioClient.calls(sid).fetch();
             const twilioStatus = call.status;
             
-            // If Twilio shows a terminal status, update cache and broadcast immediately
             const terminalStatuses = ['completed', 'busy', 'no-answer', 'canceled', 'failed'];
             if (terminalStatuses.includes(twilioStatus) && !terminalStatuses.includes(cachedCall.status)) {
                 console.log('🔴 DETECTED: Call ended via Twilio API check!', twilioStatus);
@@ -221,7 +672,6 @@ app.get('/call-status/:sid', async (req, res) => {
                 cachedCall.status = twilioStatus;
                 cachedCall.duration = duration;
                 
-                // Broadcast immediately!
                 broadcastCallStatus(sid, twilioStatus, duration, cachedCall.recordingUrl);
                 
                 return res.json({
@@ -231,7 +681,6 @@ app.get('/call-status/:sid', async (req, res) => {
                 });
             }
             
-            // Update cache with latest Twilio status
             if (twilioStatus !== cachedCall.status) {
                 cachedCall.status = twilioStatus;
                 if (twilioStatus === 'in-progress' && !cachedCall.answeredTime) {
@@ -239,7 +688,6 @@ app.get('/call-status/:sid', async (req, res) => {
                 }
             }
             
-            // Calculate duration if call is active
             if (cachedCall.status === 'in-progress' && cachedCall.answeredTime) {
                 cachedCall.duration = Math.floor((Date.now() - cachedCall.answeredTime) / 1000);
             }
@@ -252,11 +700,9 @@ app.get('/call-status/:sid', async (req, res) => {
             
         } catch (error) {
             console.error('Twilio status check error:', error.message);
-            // Fall through to cache
         }
     }
     
-    // Return cached status for non-active calls
     if (cachedCall) {
         if (cachedCall.status === 'in-progress' && cachedCall.answeredTime) {
             cachedCall.duration = Math.floor((Date.now() - cachedCall.answeredTime) / 1000);
@@ -269,24 +715,17 @@ app.get('/call-status/:sid', async (req, res) => {
         });
     }
     
-    // If not in cache, try to fetch from Twilio
     if (!twilioClient) {
         return res.status(404).json({ error: 'Call not found' });
     }
     
     try {
         const call = await twilioClient.calls(sid).fetch();
-        const status = call.status;
-        const duration = parseInt(call.duration) || 0;
-        
-        console.log('📊 Twilio status:', sid.substring(0, 10) + '...', '→', status);
-        
         res.json({
-            status: status,
-            duration: duration,
+            status: call.status,
+            duration: parseInt(call.duration) || 0,
             recordingUrl: null
         });
-        
     } catch (error) {
         console.error('❌ Status fetch error:', error.message);
         res.status(404).json({ error: 'Call not found' });
@@ -297,74 +736,55 @@ app.get('/call-status/:sid', async (req, res) => {
 app.post('/hangup-call', async (req, res) => {
     const { sid } = req.body;
     
-    console.log('✋ HANGUP requested for:', sid);
+    console.log('🔴 Hangup request for:', sid);
     
     if (!sid) {
         return res.status(400).json({ success: false, error: 'Call SID required' });
     }
     
-    const cachedCall = activeCalls.get(sid);
-    let duration = 0;
-    
-    if (cachedCall && cachedCall.answeredTime) {
-        duration = Math.floor((Date.now() - cachedCall.answeredTime) / 1000);
-    }
-    
     if (!twilioClient) {
-        if (cachedCall) {
-            cachedCall.status = 'completed';
-            cachedCall.duration = duration;
-        }
-        // Broadcast even without Twilio
-        broadcastCallStatus(sid, 'completed', duration, null);
-        return res.json({ success: true, status: 'completed', duration });
+        return res.status(500).json({ success: false, error: 'Twilio not configured' });
     }
     
     try {
-        await twilioClient.calls(sid).update({ status: 'completed' });
+        const cachedCall = activeCalls.get(sid);
+        let duration = 0;
         
-        if (cachedCall) {
-            cachedCall.status = 'completed';
+        if (cachedCall && cachedCall.answeredTime) {
+            duration = Math.floor((Date.now() - cachedCall.answeredTime) / 1000);
             cachedCall.duration = duration;
         }
         
-        console.log('✅ Call terminated, duration:', duration, 's');
+        await twilioClient.calls(sid).update({ status: 'completed' });
         
-        // Broadcast call ended
+        console.log('✅ Call ended successfully');
+        
+        if (cachedCall) {
+            cachedCall.status = 'completed';
+        }
+        
         broadcastCallStatus(sid, 'completed', duration, cachedCall?.recordingUrl || null);
         
         res.json({
             success: true,
-            status: 'completed',
+            message: 'Call ended',
             duration: duration,
             recordingUrl: cachedCall?.recordingUrl || null
         });
         
     } catch (error) {
         console.error('❌ Hangup error:', error.message);
-        if (error.code === 20404) {
-            broadcastCallStatus(sid, 'completed', duration, null);
-            return res.json({ success: true, status: 'completed', duration });
-        }
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
 // ---------------------------------------------------------
-// TWIML ENDPOINTS - Voice instructions for calls
+// TWIML ENDPOINTS
 // ---------------------------------------------------------
-
-// TwiML for outbound calls - This plays when the CALLEE answers
-// The actual connection happens through Twilio's call bridging
 app.post('/twiml/outbound', (req, res) => {
-    const { To, From, CallSid } = req.body;
-    console.log('📞 TwiML requested');
-    console.log('   CallSid:', CallSid);
-    console.log('   To:', To);
-    console.log('   From:', From);
+    const { CallSid } = req.body;
+    console.log('📞 TwiML requested for:', CallSid);
     
-    // This TwiML plays to the person being called (student)
-    // It announces the call and then keeps the line open
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">You have a call from Quran Academy. Please hold.</Say>
@@ -375,11 +795,7 @@ app.post('/twiml/outbound', (req, res) => {
     res.send(twiml);
 });
 
-// TwiML that keeps the call open for conversation
 app.all('/twiml/conference', (req, res) => {
-    console.log('📞 TwiML conference requested');
-    
-    // Use a conference to allow real two-way conversation
     const conferenceName = `call-${Date.now()}`;
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -396,39 +812,22 @@ app.all('/twiml/conference', (req, res) => {
 });
 
 // ---------------------------------------------------------
-// RECORDING WEBHOOK - Captures recording URL when ready
+// RECORDING ENDPOINTS
 // ---------------------------------------------------------
 app.post('/webhooks/recording-status', async (req, res) => {
-    const { 
-        RecordingSid, 
-        RecordingUrl, 
-        RecordingStatus, 
-        RecordingDuration,
-        CallSid 
-    } = req.body;
+    const { RecordingSid, RecordingUrl, RecordingStatus, RecordingDuration, CallSid } = req.body;
     
-    console.log('\n' + '='.repeat(50));
-    console.log('🎙️ RECORDING WEBHOOK RECEIVED');
-    console.log('   Recording SID:', RecordingSid);
-    console.log('   Call SID:', CallSid);
-    console.log('   Status:', RecordingStatus);
-    console.log('   Duration:', RecordingDuration);
-    console.log('   URL:', RecordingUrl);
-    console.log('='.repeat(50));
+    console.log('🎙️ RECORDING WEBHOOK:', RecordingStatus, 'for call:', CallSid);
     
     if (RecordingStatus === 'completed' && RecordingUrl) {
-        // Add .mp3 extension for playback
         const playableUrl = RecordingUrl + '.mp3';
         
-        // Update our local cache
         const cachedCall = activeCalls.get(CallSid);
         if (cachedCall) {
             cachedCall.recordingUrl = playableUrl;
             cachedCall.recordingSid = RecordingSid;
-            console.log('✅ Recording URL saved for call:', CallSid);
         }
         
-        // Store recording in a separate map for history lookups
         recordingsMap.set(CallSid, {
             sid: RecordingSid,
             url: playableUrl,
@@ -436,60 +835,60 @@ app.post('/webhooks/recording-status', async (req, res) => {
             timestamp: Date.now()
         });
         
-        // Broadcast recording available
+        // Update database if connected
+        if (dbConnected) {
+            try {
+                await CallHistory.findOneAndUpdate(
+                    { callSid: CallSid },
+                    { recordingUrl: playableUrl }
+                );
+            } catch (err) {
+                console.error('Error updating recording URL:', err);
+            }
+        }
+        
         broadcastCallStatus(CallSid, 'recording-ready', parseInt(RecordingDuration) || 0, playableUrl);
     }
     
     res.status(200).send('OK');
 });
 
-// GET /recording/:callSid - Get recording for a call
 app.get('/recording/:callSid', async (req, res) => {
     const { callSid } = req.params;
     
-    console.log('🎙️ Recording requested for call:', callSid);
+    console.log('🎙️ Recording requested for:', callSid);
     
-    // Check local cache first
+    // Check caches
     const cachedRecording = recordingsMap.get(callSid);
-    if (cachedRecording && cachedRecording.url) {
-        console.log('   ✅ Found in cache:', cachedRecording.url);
-        return res.json({
-            success: true,
-            recordingUrl: cachedRecording.url,
-            duration: cachedRecording.duration,
-            source: 'cache'
-        });
+    if (cachedRecording?.url) {
+        return res.json({ success: true, recordingUrl: cachedRecording.url, duration: cachedRecording.duration });
     }
     
-    // Check active calls cache
     const cachedCall = activeCalls.get(callSid);
-    if (cachedCall && cachedCall.recordingUrl) {
-        console.log('   ✅ Found in active calls:', cachedCall.recordingUrl);
-        return res.json({
-            success: true,
-            recordingUrl: cachedCall.recordingUrl,
-            duration: cachedCall.duration,
-            source: 'active-cache'
-        });
+    if (cachedCall?.recordingUrl) {
+        return res.json({ success: true, recordingUrl: cachedCall.recordingUrl, duration: cachedCall.duration });
     }
     
-    // Try to fetch from Twilio API
+    // Check database
+    if (dbConnected) {
+        try {
+            const call = await CallHistory.findOne({ callSid });
+            if (call?.recordingUrl) {
+                return res.json({ success: true, recordingUrl: call.recordingUrl, duration: call.duration });
+            }
+        } catch (err) {
+            console.error('DB recording lookup error:', err);
+        }
+    }
+    
+    // Try Twilio API
     if (twilioClient) {
         try {
-            console.log('   🔍 Searching Twilio API for recording...');
-            const recordings = await twilioClient.recordings.list({
-                callSid: callSid,
-                limit: 1
-            });
-            
+            const recordings = await twilioClient.recordings.list({ callSid, limit: 1 });
             if (recordings.length > 0) {
                 const recording = recordings[0];
                 const recordingUrl = `https://api.twilio.com${recording.uri.replace('.json', '.mp3')}`;
                 
-                console.log('   ✅ Found in Twilio API:', recordingUrl);
-                console.log('   Duration:', recording.duration, 'seconds');
-                
-                // Cache it
                 recordingsMap.set(callSid, {
                     sid: recording.sid,
                     url: recordingUrl,
@@ -497,79 +896,34 @@ app.get('/recording/:callSid', async (req, res) => {
                     timestamp: Date.now()
                 });
                 
-                return res.json({
-                    success: true,
-                    recordingUrl: recordingUrl,
-                    duration: recording.duration,
-                    source: 'twilio-api'
-                });
-            } else {
-                console.log('   ❌ No recording found in Twilio API');
-                console.log('   This could mean:');
-                console.log('   - The call was too short (< 1 second)');
-                console.log('   - The call was not answered');
-                console.log('   - Recording is still processing (try again in a few seconds)');
+                return res.json({ success: true, recordingUrl, duration: recording.duration });
             }
         } catch (error) {
-            console.error('   ❌ Error fetching from Twilio:', error.message);
+            console.error('Twilio recording fetch error:', error.message);
         }
-    } else {
-        console.log('   ❌ Twilio client not configured');
     }
     
-    console.log('   ❌ No recording found for call:', callSid);
-    res.status(404).json({ 
-        success: false, 
-        error: 'Recording not found. The call may have been too short or is still processing.' 
-    });
+    res.status(404).json({ success: false, error: 'Recording not found' });
 });
 
-// GET /recording-audio/:callSid - Stream the actual audio file (proxy for Twilio)
 app.get('/recording-audio/:callSid', async (req, res) => {
     const { callSid } = req.params;
     
-    console.log('🎵 Audio stream requested for call:', callSid);
-    
     try {
-        // First, get the recording URL
         let recordingUrl = null;
-        let recordingSid = null;
         
-        // Check local cache
         const cachedRecording = recordingsMap.get(callSid);
-        if (cachedRecording && cachedRecording.url) {
-            recordingUrl = cachedRecording.url;
-            recordingSid = cachedRecording.sid;
-        }
+        if (cachedRecording?.url) recordingUrl = cachedRecording.url;
         
-        // Check active calls cache
         if (!recordingUrl) {
             const cachedCall = activeCalls.get(callSid);
-            if (cachedCall && cachedCall.recordingUrl) {
-                recordingUrl = cachedCall.recordingUrl;
-                recordingSid = cachedCall.recordingSid;
-            }
+            if (cachedCall?.recordingUrl) recordingUrl = cachedCall.recordingUrl;
         }
         
-        // Fetch from Twilio if not cached
         if (!recordingUrl && twilioClient) {
-            const recordings = await twilioClient.recordings.list({
-                callSid: callSid,
-                limit: 1
-            });
-            
+            const recordings = await twilioClient.recordings.list({ callSid, limit: 1 });
             if (recordings.length > 0) {
-                const recording = recordings[0];
-                recordingSid = recording.sid;
-                recordingUrl = `https://api.twilio.com${recording.uri.replace('.json', '.mp3')}`;
-                
-                // Cache it
-                recordingsMap.set(callSid, {
-                    sid: recordingSid,
-                    url: recordingUrl,
-                    duration: recording.duration,
-                    timestamp: Date.now()
-                });
+                recordingUrl = `https://api.twilio.com${recordings[0].uri.replace('.json', '.mp3')}`;
             }
         }
         
@@ -577,55 +931,39 @@ app.get('/recording-audio/:callSid', async (req, res) => {
             return res.status(404).json({ error: 'Recording not found' });
         }
         
-        console.log('   Streaming from:', recordingUrl);
-        
-        // Fetch the audio from Twilio with authentication
         const authString = Buffer.from(`${config.twilio.accountSid}:${config.twilio.authToken}`).toString('base64');
         
         const audioRequest = https.request(recordingUrl, {
-            headers: {
-                'Authorization': `Basic ${authString}`
-            }
+            headers: { 'Authorization': `Basic ${authString}` }
         }, (audioResponse) => {
-            // Forward headers
             res.set('Content-Type', audioResponse.headers['content-type'] || 'audio/mpeg');
             if (audioResponse.headers['content-length']) {
                 res.set('Content-Length', audioResponse.headers['content-length']);
             }
-            res.set('Accept-Ranges', 'bytes');
-            
-            // Stream the audio
             audioResponse.pipe(res);
         });
         
         audioRequest.on('error', (err) => {
-            console.error('   Error streaming audio:', err.message);
+            console.error('Audio stream error:', err.message);
             res.status(500).json({ error: 'Failed to stream recording' });
         });
         
         audioRequest.end();
         
     } catch (error) {
-        console.error('   Error in audio stream:', error.message);
+        console.error('Audio stream error:', error.message);
         res.status(500).json({ error: 'Failed to stream recording' });
     }
 });
 
 // ---------------------------------------------------------
-// TWILIO WEBHOOKS - Real-time status updates
+// TWILIO WEBHOOKS
 // ---------------------------------------------------------
 app.post('/webhooks/call-status', (req, res) => {
     const { CallSid, CallStatus, CallDuration, RecordingUrl } = req.body;
     
-    console.log('\n' + '='.repeat(50));
-    console.log('📡 TWILIO WEBHOOK RECEIVED');
-    console.log('   SID:', CallSid);
-    console.log('   Status:', CallStatus);
-    console.log('   Duration:', CallDuration || 0);
-    console.log('   Time:', new Date().toISOString());
-    console.log('='.repeat(50));
+    console.log('📡 WEBHOOK:', CallStatus, 'for:', CallSid);
     
-    // Update our local cache
     const cachedCall = activeCalls.get(CallSid);
     let duration = parseInt(CallDuration) || 0;
     
@@ -647,49 +985,9 @@ app.post('/webhooks/call-status', (req, res) => {
         if (RecordingUrl) {
             cachedCall.recordingUrl = RecordingUrl;
         }
-        
-        // When call completes, try to fetch recording if not already available
-        if (CallStatus === 'completed' && !cachedCall.recordingUrl && twilioClient) {
-            // Fetch recording asynchronously
-            setTimeout(async () => {
-                try {
-                    const recordings = await twilioClient.recordings.list({
-                        callSid: CallSid,
-                        limit: 1
-                    });
-                    
-                    if (recordings.length > 0) {
-                        const recording = recordings[0];
-                        const recordingUrl = `https://api.twilio.com${recording.uri.replace('.json', '.mp3')}`;
-                        
-                        cachedCall.recordingUrl = recordingUrl;
-                        recordingsMap.set(CallSid, {
-                            sid: recording.sid,
-                            url: recordingUrl,
-                            duration: recording.duration,
-                            timestamp: Date.now()
-                        });
-                        
-                        console.log('✅ Recording fetched after call completed:', recordingUrl);
-                        
-                        // Broadcast recording available
-                        broadcastCallStatus(CallSid, 'recording-ready', recording.duration, recordingUrl);
-                    }
-                } catch (err) {
-                    console.error('Error fetching recording after call:', err.message);
-                }
-            }, 3000); // Wait 3 seconds for recording to be processed
-        }
-        
-        // Clean up completed calls after 10 minutes (longer for recording retrieval)
-        if (['completed', 'busy', 'no-answer', 'canceled', 'failed'].includes(CallStatus)) {
-            setTimeout(() => activeCalls.delete(CallSid), 10 * 60 * 1000);
-        }
     }
     
-    // 🚀 BROADCAST IMMEDIATELY to all connected WebSocket clients
-    broadcastCallStatus(CallSid, CallStatus, duration, RecordingUrl || cachedCall?.recordingUrl);
-    
+    broadcastCallStatus(CallSid, CallStatus, duration, cachedCall?.recordingUrl || RecordingUrl || null);
     
     res.status(200).send('OK');
 });
@@ -699,11 +997,11 @@ app.post('/webhooks/call-status', (req, res) => {
 // ---------------------------------------------------------
 app.get('/health', (req, res) => {
     res.json({
-        status: 'online',
-        twilio: twilioClient ? 'configured' : 'not configured',
-        activeCalls: activeCalls.size,
-        wsClients: wsClients.size,
-        timestamp: new Date().toISOString()
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        twilio: !!twilioClient,
+        database: dbConnected ? 'MongoDB Connected' : 'In-Memory',
+        websocket: wsClients.size + ' clients'
     });
 });
 
@@ -711,13 +1009,13 @@ app.get('/health', (req, res) => {
 // START SERVER
 // ---------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-
 server.listen(PORT, () => {
     console.log('\n' + '='.repeat(50));
-    console.log('🚀 QURAN ACADEMY SERVER (WebSocket Enabled)');
+    console.log('🚀 QURAN ACADEMY SERVER STARTED');
     console.log('='.repeat(50));
-    console.log(`📡 Server: http://localhost:${PORT}`);
-    console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
-    console.log(`🌐 Public URL: ${config.publicUrl}`);
+    console.log(`   Port: ${PORT}`);
+    console.log(`   Database: ${dbConnected ? 'MongoDB Connected ✓' : 'In-Memory (add MONGODB_URI)'}`);
+    console.log(`   Twilio: ${twilioClient ? 'Connected ✓' : 'Not configured'}`);
+    console.log(`   WebSocket: Enabled ✓`);
     console.log('='.repeat(50) + '\n');
 });
