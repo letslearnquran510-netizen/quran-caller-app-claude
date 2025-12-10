@@ -1898,7 +1898,7 @@
 
         // --- Dashboard Component (The main logged-in view) ---
         const Dashboard = (props) => {
-            const { user, onLogout, students, setStudents, callHistory, setCallHistory, teachers, setTeachers, addToast, setConfirmation, setPrompt } = props;
+            const { user, onLogout, students, setStudents, callHistory, setCallHistory, teachers, setTeachers, addToast, setConfirmation, setPrompt, dbStatus, addStudent: addStudentAPI, updateStudent: updateStudentAPI, deleteStudent: deleteStudentAPI, addTeacher: addTeacherAPI, updateTeacher: updateTeacherAPI, deleteTeacher: deleteTeacherAPI, addCallToHistoryAPI } = props;
             const [activeSection, setActiveSection] = useState(user.type === 'admin' ? 'overview' : 'students');
             const [isSidebarOpen, setSidebarOpen] = useState(false);
             
@@ -2019,8 +2019,14 @@
             }, [stopTimer, stopPolling, stopTimeout]);
 
             const addCallToHistory = useCallback((call) => {
+                // Save to local state immediately for UI
                 setCallHistory(prev => [{ ...call, id: Date.now() }, ...prev]);
-            }, [setCallHistory]);
+                
+                // Also save to database via API
+                if (addCallToHistoryAPI) {
+                    addCallToHistoryAPI(call).catch(err => console.error('Failed to save call to database:', err));
+                }
+            }, [setCallHistory, addCallToHistoryAPI]);
 
             const handleCallEnd = useCallback(({ finalStatus, finalDuration, recordingUrl, manual = false }) => {
                 console.log('📞 handleCallEnd called:', { finalStatus, finalDuration, manual });
@@ -2427,7 +2433,10 @@
                 switch (activeSection) {
                     case 'students':
                         return <StudentsSection
-                            user={user} students={students} setStudents={setStudents}
+                            user={user} students={students}
+                            addStudentAPI={addStudentAPI}
+                            updateStudentAPI={updateStudentAPI}
+                            deleteStudentAPI={deleteStudentAPI}
                             onInitiateCall={initiateCall} addToast={addToast} setConfirmation={setConfirmation}
                         />;
                     case 'calls':
@@ -2444,7 +2453,7 @@
                     case 'analytics':
                          return user.type === 'admin' ? <AnalyticsSection callHistory={callHistory} /> : null;
                     case 'users':
-                        return user.type === 'admin' ? <UsersSection teachers={teachers} setTeachers={setTeachers} addToast={addToast} setConfirmation={setConfirmation} setPrompt={setPrompt} /> : null;
+                        return user.type === 'admin' ? <UsersSection teachers={teachers} addTeacherAPI={addTeacherAPI} deleteTeacherAPI={deleteTeacherAPI} addToast={addToast} setConfirmation={setConfirmation} setPrompt={setPrompt} /> : null;
                     case 'overview':
                     default:
                          return user.type === 'admin' ? <OverviewSection students={students} callHistory={callHistory} user={user}/> : null;
@@ -2560,30 +2569,45 @@
         };
 
 
-        const StudentsSection = ({ user, students, setStudents, onInitiateCall, addToast, setConfirmation }) => {
+        const StudentsSection = ({ user, students, addStudentAPI, updateStudentAPI, deleteStudentAPI, onInitiateCall, addToast, setConfirmation }) => {
             const [searchTerm, setSearchTerm] = useState('');
             const [isModalOpen, setModalOpen] = useState(false);
             const [studentToEdit, setStudentToEdit] = useState(null);
+            const [isSaving, setIsSaving] = useState(false);
 
             const filteredStudents = useMemo(() => students.filter(s =>
                 s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                (user.type === 'admin' && s.phone.includes(searchTerm))
+                (user.type === 'admin' && s.phone && s.phone.includes(searchTerm))
             ), [students, searchTerm, user.type]);
 
-            const handleSaveStudent = (studentData) => {
-                if (studentToEdit) {
-                    setStudents(prev => prev.map(s => s.id === studentToEdit.id ? { ...s, ...studentData, updatedAt: new Date().toISOString(), updatedBy: user.name } : s));
-                    addToast(`Student "${studentData.name}" updated successfully.`, 'success');
-                } else {
-                    const newStudent = {
-                        ...studentData,
-                        id: Date.now(),
-                        addedBy: user.name,
-                        addedAt: new Date().toISOString()
-                    };
-                    setStudents(prev => [...prev, newStudent]);
-                    addToast(`Student "${studentData.name}" added successfully.`, 'success');
+            const handleSaveStudent = async (studentData) => {
+                setIsSaving(true);
+                try {
+                    if (studentToEdit) {
+                        // Update existing student via API
+                        const result = await updateStudentAPI(studentToEdit.id || studentToEdit._id, studentData);
+                        if (result.success) {
+                            addToast(`Student "${studentData.name}" updated successfully.`, 'success');
+                        } else {
+                            addToast(result.error || 'Failed to update student', 'error');
+                        }
+                    } else {
+                        // Add new student via API
+                        const result = await addStudentAPI({
+                            ...studentData,
+                            addedBy: user.name
+                        });
+                        if (result.success) {
+                            addToast(`Student "${studentData.name}" added successfully.`, 'success');
+                        } else {
+                            addToast(result.error || 'Failed to add student', 'error');
+                        }
+                    }
+                } catch (err) {
+                    console.error('Save student error:', err);
+                    addToast('Failed to save student', 'error');
                 }
+                setIsSaving(false);
                 setModalOpen(false);
                 setStudentToEdit(null);
             };
@@ -2593,9 +2617,13 @@
                     title: 'Delete Student',
                     message: `Are you sure you want to delete ${student.name}? This action cannot be undone.`,
                     confirmText: 'Delete',
-                    onConfirm: () => {
-                        setStudents(prev => prev.filter(s => s.id !== student.id));
-                        addToast(`Student "${student.name}" has been deleted.`, 'success');
+                    onConfirm: async () => {
+                        const result = await deleteStudentAPI(student.id || student._id);
+                        if (result.success) {
+                            addToast(`Student "${student.name}" has been deleted.`, 'success');
+                        } else {
+                            addToast(result.error || 'Failed to delete student', 'error');
+                        }
                     }
                 });
             };
@@ -2765,32 +2793,49 @@
             );
         };
 
-        const UsersSection = ({ teachers, setTeachers, addToast, setConfirmation, setPrompt }) => {
+        const UsersSection = ({ teachers, addTeacherAPI, deleteTeacherAPI, addToast, setConfirmation, setPrompt }) => {
             const [searchTerm, setSearchTerm] = useState('');
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [newTeacherName, setNewTeacherName] = useState('');
+            const [newTeacherEmail, setNewTeacherEmail] = useState('');
+            const [newTeacherPassword, setNewTeacherPassword] = useState('');
+            const [isSaving, setIsSaving] = useState(false);
 
             const filteredTeachers = useMemo(() => teachers.filter(t =>
                 t.name.toLowerCase().includes(searchTerm.toLowerCase())
             ), [teachers, searchTerm]);
 
-            const handleAddTeacher = () => {
-                setPrompt({
-                    title: 'Add New Teacher',
-                    message: "Enter the new teacher's full name.",
-                    label: "Teacher Name",
-                    onConfirm: (name) => {
-                        if (name && name.trim()) {
-                            const newTeacher = {
-                                id: Date.now(),
-                                name: name.trim(),
-                                addedAt: new Date().toISOString()
-                            };
-                            setTeachers(prev => [...prev, newTeacher]);
-                            addToast(`Teacher "${name.trim()}" added successfully.`, 'success');
-                        } else {
-                            addToast('Teacher name cannot be empty.', 'error');
-                        }
-                    }
+            const handleAddTeacher = async () => {
+                if (!newTeacherName.trim()) {
+                    addToast('Teacher name is required.', 'error');
+                    return;
+                }
+                if (!newTeacherEmail.trim()) {
+                    addToast('Teacher email is required.', 'error');
+                    return;
+                }
+                if (!newTeacherPassword || newTeacherPassword.length < 6) {
+                    addToast('Password must be at least 6 characters.', 'error');
+                    return;
+                }
+                
+                setIsSaving(true);
+                const result = await addTeacherAPI({
+                    name: newTeacherName.trim(),
+                    email: newTeacherEmail.trim(),
+                    password: newTeacherPassword
                 });
+                
+                if (result.success) {
+                    addToast(`Teacher "${newTeacherName.trim()}" added successfully.`, 'success');
+                    setShowAddModal(false);
+                    setNewTeacherName('');
+                    setNewTeacherEmail('');
+                    setNewTeacherPassword('');
+                } else {
+                    addToast(result.error || 'Failed to add teacher', 'error');
+                }
+                setIsSaving(false);
             };
 
             const handleDelete = (teacher) => {
@@ -2798,9 +2843,13 @@
                     title: 'Delete Teacher',
                     message: `Are you sure you want to delete ${teacher.name}? This will not affect their past call records.`,
                     confirmText: 'Delete',
-                    onConfirm: () => {
-                        setTeachers(prev => prev.filter(t => t.id !== teacher.id));
-                        addToast(`Teacher "${teacher.name}" has been deleted.`, 'success');
+                    onConfirm: async () => {
+                        const result = await deleteTeacherAPI(teacher.id || teacher._id);
+                        if (result.success) {
+                            addToast(`Teacher "${teacher.name}" has been deleted.`, 'success');
+                        } else {
+                            addToast(result.error || 'Failed to delete teacher', 'error');
+                        }
                     }
                 });
             };
@@ -2812,7 +2861,7 @@
                             <input type="text" placeholder="Search by teacher name..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-3 pl-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
                             <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                         </div>
-                        <button onClick={handleAddTeacher} className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold rounded-lg hover:opacity-90 transition-opacity">
+                        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold rounded-lg hover:opacity-90 transition-opacity">
                             <Icons.Plus className="w-5 h-5"/>
                             Add Teacher
                         </button>
@@ -2821,14 +2870,17 @@
                     {filteredTeachers.length > 0 ? (
                         <div className="space-y-3 custom-scrollbar overflow-y-auto max-h-[65vh] pr-2">
                             {filteredTeachers.map((teacher, index) => (
-                                <div key={teacher.id} className="bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fade-in" style={{ animationDelay: `${index * 30}ms` }}>
+                                <div key={teacher.id || teacher._id} className="bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fade-in" style={{ animationDelay: `${index * 30}ms` }}>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                                         <div className="flex items-center gap-4">
                                             <StudentAvatar name={teacher.name} />
-                                            <p className="font-bold text-slate-800">{teacher.name}</p>
+                                            <div>
+                                                <p className="font-bold text-slate-800">{teacher.name}</p>
+                                                <p className="text-sm text-slate-500">{teacher.email}</p>
+                                            </div>
                                         </div>
                                         <div className="text-slate-600">
-                                            <p>Added on: {new Date(teacher.addedAt).toLocaleDateString()}</p>
+                                            <p>Added: {teacher.createdAt ? new Date(teacher.createdAt).toLocaleDateString() : 'N/A'}</p>
                                         </div>
                                         <div className="flex items-center justify-end gap-2">
                                             <button onClick={() => handleDelete(teacher)} className="p-2 text-red-600 bg-red-100 rounded-full hover:bg-red-200 transition-colors" title="Delete Teacher">
@@ -2841,8 +2893,37 @@
                         </div>
                     ) : (
                          <EmptyState icon={<Icons.Users />} message="No Teachers Found" description={searchTerm ? "Your search returned no results." : "No teachers have been added yet."} action={
-                             <button onClick={handleAddTeacher} className="px-4 py-2 bg-indigo-500 text-white font-semibold rounded-lg">Add First Teacher</button>
+                             <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-indigo-500 text-white font-semibold rounded-lg">Add First Teacher</button>
                          }/>
+                    )}
+                    
+                    {/* Add Teacher Modal */}
+                    {showAddModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowAddModal(false)}>
+                            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="text-xl font-bold text-slate-800">Add New Teacher</h2>
+                                    <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
+                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-600 mb-1 block">Full Name</label>
+                                        <input type="text" value={newTeacherName} onChange={e => setNewTeacherName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Enter teacher name" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-600 mb-1 block">Email</label>
+                                        <input type="email" value={newTeacherEmail} onChange={e => setNewTeacherEmail(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="teacher@example.com" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-600 mb-1 block">Password</label>
+                                        <input type="password" value={newTeacherPassword} onChange={e => setNewTeacherPassword(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Minimum 6 characters" />
+                                    </div>
+                                    <button onClick={handleAddTeacher} disabled={isSaving} className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50">
+                                        {isSaving ? 'Adding...' : 'Add Teacher'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     )}
                 </div>
             );
