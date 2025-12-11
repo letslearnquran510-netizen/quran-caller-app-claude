@@ -108,10 +108,39 @@ const callHistorySchema = new mongoose.Schema({
     timestamp: { type: Date, default: Date.now }
 });
 
+// SMS Message Schema
+const messageSchema = new mongoose.Schema({
+    studentId: { type: String, required: true },
+    studentName: { type: String, required: true },
+    studentPhone: { type: String, required: true },
+    direction: { type: String, enum: ['inbound', 'outbound'], required: true },
+    body: { type: String, required: true },
+    senderName: { type: String }, // Teacher name for outbound
+    senderId: { type: String }, // Teacher ID for outbound
+    messageSid: { type: String }, // Twilio message SID
+    status: { type: String, default: 'sent' }, // sent, delivered, failed
+    read: { type: Boolean, default: false },
+    timestamp: { type: Date, default: Date.now }
+});
+
+// Conversation Schema (for tracking last message per student)
+const conversationSchema = new mongoose.Schema({
+    studentId: { type: String, required: true, unique: true },
+    studentName: { type: String, required: true },
+    studentPhone: { type: String, required: true },
+    lastMessage: { type: String },
+    lastMessageTime: { type: Date, default: Date.now },
+    lastMessageDirection: { type: String, enum: ['inbound', 'outbound'] },
+    unreadCount: { type: Number, default: 0 },
+    updatedAt: { type: Date, default: Date.now }
+});
+
 // Create models
 const User = mongoose.model('User', userSchema);
 const Student = mongoose.model('Student', studentSchema);
 const CallHistory = mongoose.model('CallHistory', callHistorySchema);
+const Message = mongoose.model('Message', messageSchema);
+const Conversation = mongoose.model('Conversation', conversationSchema);
 
 // Initialize default admin account
 async function initializeAdmin() {
@@ -144,6 +173,8 @@ const recordingsMap = new Map();
 let inMemoryStudents = [];
 let inMemoryTeachers = [];
 let inMemoryCallHistory = [];
+let inMemoryMessages = [];
+let inMemoryConversations = [];
 
 // ---------------------------------------------------------
 // TWILIO CONFIGURATION
@@ -215,6 +246,21 @@ function broadcastCallStatus(callSid, status, duration, recordingUrl) {
             if (!client.subscribedCallSid || client.subscribedCallSid === callSid) {
                 client.send(message);
             }
+        }
+    });
+}
+
+// Broadcast new SMS message to all clients
+function broadcastNewMessage(message) {
+    const payload = JSON.stringify({
+        type: 'NEW_SMS_MESSAGE',
+        message,
+        timestamp: Date.now()
+    });
+    
+    wsClients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(payload);
         }
     });
 }
@@ -591,6 +637,175 @@ app.get('/api/db-status', (req, res) => {
             ? 'All data is permanently saved' 
             : 'Data will be lost on server restart. Add MONGODB_URI for permanent storage.'
     });
+});
+
+// ==========================================================
+// SMS MESSAGING API
+// ==========================================================
+
+// Get all conversations (for Messages sidebar)
+app.get('/api/sms/conversations', async (req, res) => {
+    try {
+        if (dbConnected) {
+            const conversations = await Conversation.find()
+                .sort({ lastMessageTime: -1 });
+            return res.json({ success: true, conversations });
+        } else {
+            return res.json({ success: true, conversations: inMemoryConversations });
+        }
+    } catch (err) {
+        console.error('Get conversations error:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch conversations' });
+    }
+});
+
+// Get messages for a specific student
+app.get('/api/sms/messages/:studentId', async (req, res) => {
+    const { studentId } = req.params;
+    
+    try {
+        if (dbConnected) {
+            const messages = await Message.find({ studentId })
+                .sort({ timestamp: 1 }); // Oldest first for chat view
+            
+            // Mark messages as read
+            await Message.updateMany(
+                { studentId, direction: 'inbound', read: false },
+                { read: true }
+            );
+            
+            // Reset unread count for this conversation
+            await Conversation.findOneAndUpdate(
+                { studentId },
+                { unreadCount: 0 }
+            );
+            
+            return res.json({ success: true, messages });
+        } else {
+            const messages = inMemoryMessages
+                .filter(m => m.studentId === studentId)
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            return res.json({ success: true, messages });
+        }
+    } catch (err) {
+        console.error('Get messages error:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch messages' });
+    }
+});
+
+// Send SMS to a student
+app.post('/api/sms/send', async (req, res) => {
+    const { studentId, studentName, studentPhone, body, senderName, senderId } = req.body;
+    
+    console.log('\n' + '='.repeat(50));
+    console.log('📱 SENDING SMS');
+    console.log('   To:', studentPhone);
+    console.log('   Student:', studentName);
+    console.log('   Message:', body.substring(0, 50) + (body.length > 50 ? '...' : ''));
+    console.log('='.repeat(50));
+    
+    if (!studentPhone || !body) {
+        return res.status(400).json({ success: false, error: 'Phone number and message body required' });
+    }
+    
+    if (!twilioClient) {
+        return res.status(500).json({ success: false, error: 'Twilio not configured' });
+    }
+    
+    try {
+        // Send via Twilio
+        const twilioMessage = await twilioClient.messages.create({
+            body: body,
+            from: config.twilio.phoneNumber,
+            to: studentPhone,
+            statusCallback: `${config.publicUrl}/webhooks/sms-status`
+        });
+        
+        console.log('✅ SMS sent, SID:', twilioMessage.sid);
+        
+        // Save message to database
+        const messageData = {
+            studentId: studentId || studentPhone,
+            studentName: studentName || 'Unknown',
+            studentPhone,
+            direction: 'outbound',
+            body,
+            senderName: senderName || 'Admin',
+            senderId: senderId || 'admin',
+            messageSid: twilioMessage.sid,
+            status: 'sent',
+            timestamp: new Date()
+        };
+        
+        let savedMessage;
+        if (dbConnected) {
+            savedMessage = await Message.create(messageData);
+            
+            // Update or create conversation
+            await Conversation.findOneAndUpdate(
+                { studentId: messageData.studentId },
+                {
+                    studentId: messageData.studentId,
+                    studentName: messageData.studentName,
+                    studentPhone: messageData.studentPhone,
+                    lastMessage: body,
+                    lastMessageTime: new Date(),
+                    lastMessageDirection: 'outbound',
+                    updatedAt: new Date()
+                },
+                { upsert: true, new: true }
+            );
+        } else {
+            savedMessage = { ...messageData, _id: Date.now().toString() };
+            inMemoryMessages.push(savedMessage);
+            
+            // Update in-memory conversations
+            const convIndex = inMemoryConversations.findIndex(c => c.studentId === messageData.studentId);
+            const convData = {
+                studentId: messageData.studentId,
+                studentName: messageData.studentName,
+                studentPhone: messageData.studentPhone,
+                lastMessage: body,
+                lastMessageTime: new Date(),
+                lastMessageDirection: 'outbound',
+                unreadCount: 0,
+                updatedAt: new Date()
+            };
+            if (convIndex >= 0) {
+                inMemoryConversations[convIndex] = convData;
+            } else {
+                inMemoryConversations.unshift(convData);
+            }
+        }
+        
+        // Broadcast to all clients
+        broadcastNewMessage(savedMessage);
+        
+        res.json({ success: true, message: savedMessage });
+        
+    } catch (err) {
+        console.error('❌ SMS send error:', err.message);
+        res.status(500).json({ success: false, error: err.message || 'Failed to send SMS' });
+    }
+});
+
+// Get unread count for all conversations
+app.get('/api/sms/unread-count', async (req, res) => {
+    try {
+        if (dbConnected) {
+            const result = await Conversation.aggregate([
+                { $group: { _id: null, total: { $sum: '$unreadCount' } } }
+            ]);
+            const totalUnread = result.length > 0 ? result[0].total : 0;
+            return res.json({ success: true, unreadCount: totalUnread });
+        } else {
+            const totalUnread = inMemoryConversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+            return res.json({ success: true, unreadCount: totalUnread });
+        }
+    } catch (err) {
+        console.error('Get unread count error:', err);
+        res.status(500).json({ success: false, error: 'Failed to get unread count' });
+    }
 });
 
 // ==========================================================
@@ -988,6 +1203,135 @@ app.post('/webhooks/call-status', (req, res) => {
     }
     
     broadcastCallStatus(CallSid, CallStatus, duration, cachedCall?.recordingUrl || RecordingUrl || null);
+    
+    res.status(200).send('OK');
+});
+
+// ---------------------------------------------------------
+// SMS WEBHOOKS
+// ---------------------------------------------------------
+
+// Webhook for incoming SMS messages
+app.post('/webhooks/sms-incoming', async (req, res) => {
+    const { From, Body, MessageSid } = req.body;
+    
+    console.log('\n' + '='.repeat(50));
+    console.log('📥 INCOMING SMS');
+    console.log('   From:', From);
+    console.log('   Message:', Body.substring(0, 50) + (Body.length > 50 ? '...' : ''));
+    console.log('='.repeat(50));
+    
+    try {
+        // Find student by phone number
+        let student = null;
+        let studentId = From;
+        let studentName = From;
+        
+        if (dbConnected) {
+            student = await Student.findOne({ phone: From });
+            if (student) {
+                studentId = student._id.toString();
+                studentName = student.name;
+            }
+        } else {
+            student = inMemoryStudents.find(s => s.phone === From);
+            if (student) {
+                studentId = student.id;
+                studentName = student.name;
+            }
+        }
+        
+        // Save incoming message
+        const messageData = {
+            studentId,
+            studentName,
+            studentPhone: From,
+            direction: 'inbound',
+            body: Body,
+            messageSid: MessageSid,
+            status: 'received',
+            read: false,
+            timestamp: new Date()
+        };
+        
+        let savedMessage;
+        if (dbConnected) {
+            savedMessage = await Message.create(messageData);
+            
+            // Update or create conversation with unread count
+            await Conversation.findOneAndUpdate(
+                { studentId },
+                {
+                    studentId,
+                    studentName,
+                    studentPhone: From,
+                    lastMessage: Body,
+                    lastMessageTime: new Date(),
+                    lastMessageDirection: 'inbound',
+                    $inc: { unreadCount: 1 },
+                    updatedAt: new Date()
+                },
+                { upsert: true, new: true }
+            );
+        } else {
+            savedMessage = { ...messageData, _id: Date.now().toString() };
+            inMemoryMessages.push(savedMessage);
+            
+            // Update in-memory conversations
+            const convIndex = inMemoryConversations.findIndex(c => c.studentPhone === From);
+            if (convIndex >= 0) {
+                inMemoryConversations[convIndex].lastMessage = Body;
+                inMemoryConversations[convIndex].lastMessageTime = new Date();
+                inMemoryConversations[convIndex].lastMessageDirection = 'inbound';
+                inMemoryConversations[convIndex].unreadCount = (inMemoryConversations[convIndex].unreadCount || 0) + 1;
+            } else {
+                inMemoryConversations.unshift({
+                    studentId,
+                    studentName,
+                    studentPhone: From,
+                    lastMessage: Body,
+                    lastMessageTime: new Date(),
+                    lastMessageDirection: 'inbound',
+                    unreadCount: 1,
+                    updatedAt: new Date()
+                });
+            }
+        }
+        
+        // Broadcast to all clients
+        broadcastNewMessage(savedMessage);
+        
+        console.log('✅ Incoming SMS saved');
+        
+        // Respond to Twilio (empty TwiML means no auto-reply)
+        res.set('Content-Type', 'text/xml');
+        res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+        
+    } catch (err) {
+        console.error('❌ SMS incoming webhook error:', err);
+        res.status(500).send('Error processing incoming SMS');
+    }
+});
+
+// Webhook for SMS delivery status updates
+app.post('/webhooks/sms-status', async (req, res) => {
+    const { MessageSid, MessageStatus } = req.body;
+    
+    console.log('📱 SMS Status Update:', MessageStatus, 'for:', MessageSid);
+    
+    try {
+        if (dbConnected) {
+            await Message.findOneAndUpdate(
+                { messageSid: MessageSid },
+                { status: MessageStatus }
+            );
+        } else {
+            const msg = inMemoryMessages.find(m => m.messageSid === MessageSid);
+            if (msg) msg.status = MessageStatus;
+        }
+    } catch (err) {
+        console.error('SMS status update error:', err);
+    }
     
     res.status(200).send('OK');
 });
