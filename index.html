@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Quran Academy -Professional System</title>
+    <title>Quran Academy - Professional System</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       /* Custom scrollbar for webkit browsers */
@@ -136,6 +136,35 @@
                 <IconWrapper className={className}>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                    </svg>
+                </IconWrapper>
+            ),
+            Video: ({ className }) => (
+                <IconWrapper className={className}>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                    </svg>
+                </IconWrapper>
+            ),
+            VideoOff: ({ className }) => (
+                <IconWrapper className={className}>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 0 1-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 0 0-2.25-2.25h-9c-.621 0-1.184.252-1.591.659m12.182 12.182L2.909 5.909M1.5 4.5l1.409 1.409" />
+                    </svg>
+                </IconWrapper>
+            ),
+            Mic: ({ className }) => (
+                <IconWrapper className={className}>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
+                    </svg>
+                </IconWrapper>
+            ),
+            MicOff: ({ className }) => (
+                <IconWrapper className={className}>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
                     </svg>
                 </IconWrapper>
             ),
@@ -2517,6 +2546,7 @@
                 overview: { title: 'Dashboard Overview', subtitle: "Welcome back! Here's your overview" },
                 students: { title: 'Students List', subtitle: 'Select a student to begin calling' },
                 calls: { title: 'Call Center', subtitle: 'Make calls to your students' },
+                video: { title: 'Video Call', subtitle: 'Face-to-face video classes with students' },
                 messages: { title: 'Messages', subtitle: 'Send and receive SMS messages' },
                 history: { title: 'Call History', subtitle: 'View all past calls' },
                 analytics: { title: 'Analytics & Reports', subtitle: 'Performance metrics' },
@@ -2541,6 +2571,12 @@
                                 setShowCallModal(false);
                                 setCallState({ status: 'idle', student: null, sid: null, duration: 0, isMuted: false, isHoldActive: false, isMicrophoneReady: false, finishReason: ''});
                             }}
+                        />;
+                    case 'video':
+                        return <VideoCallSection 
+                            user={user} 
+                            students={students}
+                            addToast={addToast}
                         />;
                     case 'history':
                         return <HistorySection user={user} callHistory={callHistory} />;
@@ -2663,6 +2699,7 @@
                             {user.type === 'admin' && <NavItem section="overview" icon={<Icons.Dashboard className="w-5 h-5"/>} label="Overview" />}
                             <NavItem section="students" icon={<Icons.Students className="w-5 h-5"/>} label="Students" />
                             <NavItem section="calls" icon={<Icons.CallCenter className="w-5 h-5"/>} label="Call Center" />
+                            <NavItem section="video" icon={<Icons.Video className="w-5 h-5"/>} label="Video Call" />
                             <NavItem section="messages" icon={<Icons.Messages className="w-5 h-5"/>} label="Messages" />
                             <NavItem section="history" icon={<Icons.History className="w-5 h-5"/>} label="History" />
                             {user.type === 'admin' && <NavItem section="analytics" icon={<Icons.Analytics className="w-5 h-5"/>} label="Analytics" />}
@@ -2897,6 +2934,467 @@
                                 </button>
                             </div>
                         )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Video Call Section Component ---
+        const VideoCallSection = ({ user, students, addToast }) => {
+            const [selectedStudentId, setSelectedStudentId] = useState(null);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [isInCall, setIsInCall] = useState(false);
+            const [isConnecting, setIsConnecting] = useState(false);
+            const [currentRoom, setCurrentRoom] = useState(null);
+            const [roomToken, setRoomToken] = useState(null);
+            const [callDuration, setCallDuration] = useState(0);
+            const [studentJoined, setStudentJoined] = useState(false);
+            const [isMuted, setIsMuted] = useState(false);
+            const [isCameraOff, setIsCameraOff] = useState(false);
+            
+            const localVideoRef = useRef(null);
+            const remoteVideoRef = useRef(null);
+            const roomRef = useRef(null);
+            const timerRef = useRef(null);
+            
+            // Find selected student
+            const student = useMemo(() => students.find(s => 
+                String(s.id) === String(selectedStudentId) || 
+                String(s._id) === String(selectedStudentId)
+            ), [students, selectedStudentId]);
+            
+            // Filter students by search
+            const filteredStudents = useMemo(() => {
+                if (!searchTerm) return students;
+                return students.filter(s => 
+                    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    (s.phone && s.phone.includes(searchTerm))
+                );
+            }, [students, searchTerm]);
+            
+            // Cleanup on unmount
+            useEffect(() => {
+                return () => {
+                    if (roomRef.current) {
+                        roomRef.current.disconnect();
+                    }
+                    if (timerRef.current) {
+                        clearInterval(timerRef.current);
+                    }
+                };
+            }, []);
+            
+            // Format duration
+            const formatDuration = (seconds) => {
+                const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const secs = (seconds % 60).toString().padStart(2, '0');
+                return `${mins}:${secs}`;
+            };
+            
+            // Start video call
+            const startVideoCall = async () => {
+                if (!student) {
+                    addToast('Please select a student first', 'error');
+                    return;
+                }
+                
+                setIsConnecting(true);
+                
+                try {
+                    // Create room via API
+                    const response = await fetch(`${BACKEND_URL}/api/video/create-room`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            studentId: student.id || student._id,
+                            studentName: student.name,
+                            studentPhone: student.phone,
+                            teacherId: user.id || user._id,
+                            teacherName: user.name
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!data.success) {
+                        throw new Error(data.error || 'Failed to create video room');
+                    }
+                    
+                    console.log('Room created:', data.room.roomName);
+                    
+                    // Load Twilio Video SDK dynamically if not loaded
+                    if (!window.Twilio || !window.Twilio.Video) {
+                        await loadTwilioVideoSDK();
+                    }
+                    
+                    // Connect to room
+                    const room = await window.Twilio.Video.connect(data.room.teacherToken, {
+                        name: data.room.roomName,
+                        audio: true,
+                        video: { width: 640, height: 480 }
+                    });
+                    
+                    roomRef.current = room;
+                    setCurrentRoom(data.room);
+                    setRoomToken(data.room.teacherToken);
+                    setIsInCall(true);
+                    setIsConnecting(false);
+                    
+                    addToast(`Video room created! SMS sent to ${student.name}`, 'success');
+                    
+                    // Start duration timer
+                    timerRef.current = setInterval(() => {
+                        setCallDuration(prev => prev + 1);
+                    }, 1000);
+                    
+                    // Attach local video
+                    room.localParticipant.tracks.forEach(publication => {
+                        if (publication.track && publication.track.kind === 'video') {
+                            const localContainer = localVideoRef.current;
+                            if (localContainer) {
+                                localContainer.innerHTML = '';
+                                localContainer.appendChild(publication.track.attach());
+                            }
+                        }
+                    });
+                    
+                    // Handle existing participants
+                    room.participants.forEach(handleParticipantConnected);
+                    
+                    // Handle new participants
+                    room.on('participantConnected', handleParticipantConnected);
+                    room.on('participantDisconnected', handleParticipantDisconnected);
+                    
+                    // Handle disconnect
+                    room.on('disconnected', () => {
+                        console.log('Disconnected from room');
+                        endCall(false);
+                    });
+                    
+                } catch (err) {
+                    console.error('Start video call error:', err);
+                    setIsConnecting(false);
+                    addToast(err.message || 'Failed to start video call', 'error');
+                }
+            };
+            
+            // Load Twilio Video SDK
+            const loadTwilioVideoSDK = () => {
+                return new Promise((resolve, reject) => {
+                    if (window.Twilio && window.Twilio.Video) {
+                        resolve();
+                        return;
+                    }
+                    
+                    const script = document.createElement('script');
+                    script.src = 'https://sdk.twilio.com/js/video/releases/2.28.1/twilio-video.min.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('Failed to load Twilio Video SDK'));
+                    document.head.appendChild(script);
+                });
+            };
+            
+            // Handle participant connected
+            const handleParticipantConnected = (participant) => {
+                console.log('Participant connected:', participant.identity);
+                setStudentJoined(true);
+                addToast(`${participant.identity} joined the video call`, 'success');
+                
+                // Handle existing tracks
+                participant.tracks.forEach(publication => {
+                    if (publication.isSubscribed && publication.track) {
+                        handleTrackSubscribed(publication.track);
+                    }
+                });
+                
+                // Handle new tracks
+                participant.on('trackSubscribed', handleTrackSubscribed);
+                participant.on('trackUnsubscribed', handleTrackUnsubscribed);
+            };
+            
+            // Handle participant disconnected
+            const handleParticipantDisconnected = (participant) => {
+                console.log('Participant disconnected:', participant.identity);
+                setStudentJoined(false);
+                addToast(`${participant.identity} left the video call`, 'info');
+            };
+            
+            // Handle track subscribed
+            const handleTrackSubscribed = (track) => {
+                const remoteContainer = remoteVideoRef.current;
+                if (remoteContainer && (track.kind === 'video' || track.kind === 'audio')) {
+                    remoteContainer.appendChild(track.attach());
+                }
+            };
+            
+            // Handle track unsubscribed
+            const handleTrackUnsubscribed = (track) => {
+                track.detach().forEach(element => element.remove());
+            };
+            
+            // Toggle microphone
+            const toggleMic = () => {
+                if (roomRef.current) {
+                    roomRef.current.localParticipant.audioTracks.forEach(publication => {
+                        if (isMuted) {
+                            publication.track.enable();
+                        } else {
+                            publication.track.disable();
+                        }
+                    });
+                    setIsMuted(!isMuted);
+                }
+            };
+            
+            // Toggle camera
+            const toggleCamera = () => {
+                if (roomRef.current) {
+                    roomRef.current.localParticipant.videoTracks.forEach(publication => {
+                        if (isCameraOff) {
+                            publication.track.enable();
+                        } else {
+                            publication.track.disable();
+                        }
+                    });
+                    setIsCameraOff(!isCameraOff);
+                }
+            };
+            
+            // End call
+            const endCall = async (notifyServer = true) => {
+                if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                }
+                
+                if (roomRef.current) {
+                    // Stop all local tracks
+                    roomRef.current.localParticipant.tracks.forEach(publication => {
+                        if (publication.track) {
+                            publication.track.stop();
+                        }
+                    });
+                    
+                    roomRef.current.disconnect();
+                    roomRef.current = null;
+                }
+                
+                // Notify server
+                if (notifyServer && currentRoom) {
+                    try {
+                        await fetch(`${BACKEND_URL}/api/video/end-room`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ roomName: currentRoom.roomName })
+                        });
+                    } catch (err) {
+                        console.error('End room error:', err);
+                    }
+                }
+                
+                // Clear video containers
+                if (localVideoRef.current) localVideoRef.current.innerHTML = '';
+                if (remoteVideoRef.current) remoteVideoRef.current.innerHTML = '';
+                
+                // Reset state
+                setIsInCall(false);
+                setCurrentRoom(null);
+                setRoomToken(null);
+                setCallDuration(0);
+                setStudentJoined(false);
+                setIsMuted(false);
+                setIsCameraOff(false);
+                
+                addToast('Video call ended', 'info');
+            };
+            
+            // Copy join link
+            const copyJoinLink = () => {
+                if (currentRoom && currentRoom.joinUrl) {
+                    navigator.clipboard.writeText(currentRoom.joinUrl);
+                    addToast('Join link copied to clipboard!', 'success');
+                }
+            };
+            
+            // Render video call in progress
+            if (isInCall) {
+                return (
+                    <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-700 h-[calc(100vh-200px)] flex flex-col overflow-hidden">
+                        {/* Header */}
+                        <div className="p-4 bg-slate-800 flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                <StudentAvatar name={student?.name || 'Student'} />
+                                <div>
+                                    <p className="text-white font-bold">{student?.name || 'Student'}</p>
+                                    <p className="text-sm text-slate-400">
+                                        {studentJoined ? 'Connected' : 'Waiting for student to join...'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-white text-xl font-mono">{formatDuration(callDuration)}</p>
+                                <button 
+                                    onClick={copyJoinLink}
+                                    className="text-xs text-indigo-400 hover:text-indigo-300"
+                                >
+                                    Copy invite link
+                                </button>
+                            </div>
+                        </div>
+                        
+                        {/* Video Area */}
+                        <div className="flex-1 relative bg-slate-950 flex items-center justify-center">
+                            {/* Remote Video */}
+                            <div 
+                                ref={remoteVideoRef}
+                                className="w-full h-full flex items-center justify-center"
+                                style={{ backgroundColor: '#0f0d1a' }}
+                            >
+                                {!studentJoined && (
+                                    <div className="text-center text-slate-400">
+                                        <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                        <p className="text-xl mb-2">Waiting for student...</p>
+                                        <p className="text-sm">SMS invitation sent to {student?.name}</p>
+                                        <p className="text-xs mt-4 text-slate-500">
+                                            Join link: {currentRoom?.joinUrl}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            {/* Local Video (Picture-in-Picture) */}
+                            <div 
+                                ref={localVideoRef}
+                                className="absolute bottom-24 right-4 w-40 h-52 bg-slate-800 rounded-xl overflow-hidden border-2 border-indigo-500 shadow-xl"
+                                style={{ transform: 'scaleX(-1)' }}
+                            >
+                            </div>
+                        </div>
+                        
+                        {/* Controls */}
+                        <div className="p-4 bg-gradient-to-t from-slate-900 to-transparent absolute bottom-0 left-0 right-0 flex justify-center gap-4">
+                            <button 
+                                onClick={toggleMic}
+                                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                                    isMuted ? 'bg-slate-600 text-slate-300' : 'bg-indigo-500 text-white'
+                                }`}
+                            >
+                                {isMuted ? <Icons.MicOff className="w-6 h-6" /> : <Icons.Mic className="w-6 h-6" />}
+                            </button>
+                            
+                            <button 
+                                onClick={() => endCall(true)}
+                                className="w-14 h-14 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
+                            >
+                                <Icons.PhoneXMark className="w-6 h-6" />
+                            </button>
+                            
+                            <button 
+                                onClick={toggleCamera}
+                                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                                    isCameraOff ? 'bg-slate-600 text-slate-300' : 'bg-indigo-500 text-white'
+                                }`}
+                            >
+                                {isCameraOff ? <Icons.VideoOff className="w-6 h-6" /> : <Icons.Video className="w-6 h-6" />}
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+            
+            // Render student selection
+            return (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        {/* Student Selection */}
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-800 mb-4">Select Student</h3>
+                            
+                            {/* Search */}
+                            <div className="relative mb-4">
+                                <input 
+                                    type="text" 
+                                    placeholder="Search students..." 
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                    className="w-full p-3 pl-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                />
+                                <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            </div>
+                            
+                            {/* Student List */}
+                            <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+                                {filteredStudents.length > 0 ? (
+                                    filteredStudents.map(s => (
+                                        <div 
+                                            key={s.id || s._id}
+                                            onClick={() => setSelectedStudentId(s.id || s._id)}
+                                            className={`p-3 rounded-lg cursor-pointer flex items-center gap-3 transition-colors ${
+                                                selectedStudentId === (s.id || s._id) 
+                                                    ? 'bg-indigo-100 border-2 border-indigo-500' 
+                                                    : 'bg-slate-50 hover:bg-slate-100 border-2 border-transparent'
+                                            }`}
+                                        >
+                                            <StudentAvatar name={s.name} size="md" />
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-slate-800">{s.name}</p>
+                                                {user.type === 'admin' && (
+                                                    <p className="text-sm text-slate-500">{s.phone}</p>
+                                                )}
+                                            </div>
+                                            {selectedStudentId === (s.id || s._id) && (
+                                                <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center">
+                                                    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-center py-8 text-slate-500">
+                                        <Icons.Students className="w-12 h-12 mx-auto mb-2 text-slate-300" />
+                                        <p>No students found</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        
+                        {/* Video Call Preview */}
+                        <div className="flex flex-col items-center justify-center p-8 bg-gradient-to-br from-indigo-50 to-violet-50 rounded-xl">
+                            {student ? (
+                                <>
+                                    <StudentAvatar name={student.name} size="xl" />
+                                    <h2 className="text-2xl font-bold text-slate-800 mt-4">{student.name}</h2>
+                                    <p className="text-slate-500">{user.type === 'admin' ? student.phone : 'Ready for video call'}</p>
+                                    
+                                    <button 
+                                        onClick={startVideoCall}
+                                        disabled={isConnecting}
+                                        className="mt-8 w-32 h-32 bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-full flex flex-col items-center justify-center shadow-lg hover:shadow-xl transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isConnecting ? (
+                                            <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
+                                            <>
+                                                <Icons.Video className="w-10 h-10"/>
+                                                <span className="text-sm font-semibold mt-2">Start Call</span>
+                                            </>
+                                        )}
+                                    </button>
+                                    
+                                    <p className="mt-4 text-sm text-slate-500 text-center">
+                                        Student will receive an SMS with the join link
+                                    </p>
+                                </>
+                            ) : (
+                                <div className="text-center text-slate-500">
+                                    <Icons.Video className="w-20 h-20 mx-auto mb-4 text-slate-300" />
+                                    <p className="text-lg font-medium text-slate-600">Select a Student</p>
+                                    <p className="text-sm mt-2">Choose a student from the list to start a video call</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             );
