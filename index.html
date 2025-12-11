@@ -925,7 +925,7 @@
                              {recentStudents.length > 0 ? (
                                 <div className="space-y-3">
                                     {recentStudents.map(s => (
-                                        <div key={s.id} className="bg-slate-50 p-3 rounded-lg flex items-center gap-3">
+                                        <div key={s.id || s._id} className="bg-slate-50 p-3 rounded-lg flex items-center gap-3">
                                             <StudentAvatar name={s.name} size="md" />
                                             <div>
                                                 <p className="font-semibold text-slate-700">{s.name}</p>
@@ -2646,7 +2646,7 @@
                     {filteredStudents.length > 0 ? (
                         <div className="space-y-3 custom-scrollbar overflow-y-auto max-h-[65vh] pr-2">
                             {filteredStudents.map((student, index) => (
-                                <div key={student.id} className="bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fade-in" style={{ animationDelay: `${index * 30}ms` }}>
+                                <div key={student.id || student._id} className="bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fade-in" style={{ animationDelay: `${index * 30}ms` }}>
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
                                         <div className="flex items-center gap-4">
                                             <StudentAvatar name={student.name} />
@@ -2695,7 +2695,11 @@
 
         const CallCenterSection = ({ user, students, onInitiateCall, callState, onResetCall }) => {
             const [selectedStudentId, setSelectedStudentId] = useState(null);
-            const student = useMemo(() => students.find(s => s.id === selectedStudentId), [students, selectedStudentId]);
+            // Match by either id or _id, and handle both string and number types
+            const student = useMemo(() => students.find(s => 
+                String(s.id) === String(selectedStudentId) || 
+                String(s._id) === String(selectedStudentId)
+            ), [students, selectedStudentId]);
 
             const RealTimeNotice = () => (
                 <div className="bg-green-100 border-l-4 border-green-500 text-green-800 p-4 rounded-lg mb-6 flex items-start gap-3 text-sm">
@@ -2764,12 +2768,12 @@
                         <h2 className="text-xl font-bold text-slate-800 mb-4">Select a Student to Call</h2>
                         {students.length > 0 ? (
                             <select 
-                                onChange={e => setSelectedStudentId(Number(e.target.value))} 
+                                onChange={e => setSelectedStudentId(e.target.value || null)} 
                                 className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                                 value={selectedStudentId || ''}
                             >
                                 <option value="">-- Choose a student --</option>
-                                {students.map(s => <option key={s.id} value={s.id}>{s.name}{user.type === 'admin' ? ` - ${s.phone}` : ''}</option>)}
+                                {students.map(s => <option key={s.id || s._id} value={s.id || s._id}>{s.name}{user.type === 'admin' ? ` - ${s.phone}` : ''}</option>)}
                             </select>
                         ) : (
                             <p className="text-slate-500">No students available to call. Please add students first.</p>
