@@ -32,6 +32,11 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Serve video-room.html for student video calls
+app.get('/video-room.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'video-room.html'));
+});
+
 // ---------------------------------------------------------
 // CONFIGURATION
 // ---------------------------------------------------------
