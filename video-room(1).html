@@ -598,7 +598,9 @@
                 joinBtn.disabled = false;
                 joinBtnText.textContent = 'Join Video Class';
                 
-                if (err.message.includes('not found') || err.message.includes('expired')) {
+                if (err.message.includes('not configured')) {
+                    showError('Video Not Available', 'Video calling is not configured. Please contact your teacher.');
+                } else if (err.message.includes('not found') || err.message.includes('expired')) {
                     showError('Room Not Found', 'This video call has ended or the link has expired.');
                 } else if (err.message.includes('permission') || err.message.includes('NotAllowed')) {
                     showError('Permission Denied', 'Please allow camera and microphone access to join the video call.');
