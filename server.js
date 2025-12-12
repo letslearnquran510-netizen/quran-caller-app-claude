@@ -55,6 +55,23 @@ const config = {
 // ---------------------------------------------------------
 let dbConnected = false;
 
+// Function to check if database is actually connected
+function isDbConnected() {
+    return mongoose.connection.readyState === 1;
+}
+
+// Wait for database connection (with timeout)
+async function waitForDbConnection(timeoutMs = 5000) {
+    if (isDbConnected()) return true;
+    
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+        if (isDbConnected()) return true;
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return isDbConnected();
+}
+
 if (config.mongoUri) {
     mongoose.connect(config.mongoUri)
         .then(() => {
@@ -65,6 +82,21 @@ if (config.mongoUri) {
         .catch(err => {
             console.error('❌ MongoDB connection error:', err.message);
         });
+    
+    // Handle connection events
+    mongoose.connection.on('connected', () => {
+        console.log('✅ MongoDB reconnected');
+        dbConnected = true;
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+        console.log('⚠️ MongoDB disconnected');
+        dbConnected = false;
+    });
+    
+    mongoose.connection.on('error', (err) => {
+        console.error('❌ MongoDB error:', err.message);
+    });
 } else {
     console.log('⚠️ MongoDB URI not configured - using in-memory storage');
     console.log('   Add MONGODB_URI environment variable for permanent storage');
@@ -914,18 +946,28 @@ app.post('/api/video/create-room', async (req, res) => {
         };
         
         let savedRoom;
-        if (dbConnected) {
-            savedRoom = await VideoRoom.create(roomData);
+        if (isDbConnected()) {
+            try {
+                savedRoom = await VideoRoom.create(roomData);
+                console.log('✅ Room saved to database:', roomName);
+            } catch (dbErr) {
+                console.error('⚠️ Failed to save room to database:', dbErr.message);
+                savedRoom = { ...roomData, _id: Date.now().toString() };
+            }
         } else {
             savedRoom = { ...roomData, _id: Date.now().toString() };
+            console.log('⚠️ Room NOT saved to database (no connection)');
         }
         
-        // Track active room
+        // Track active room - teacher is joining immediately
         activeVideoRooms.set(roomName, {
             ...roomData,
-            teacherJoined: false,
+            teacherJoined: true,
             studentJoined: false
         });
+        
+        console.log('✅ Room added to active rooms:', roomName);
+        console.log('   Total active rooms:', activeVideoRooms.size);
         
         // Send SMS invitation to student
         if (twilioClient) {
@@ -971,7 +1013,13 @@ app.get('/api/video/join/:roomName', async (req, res) => {
     const { roomName } = req.params;
     const { name } = req.query;
     
-    console.log('🎥 Student joining room:', roomName, 'Name:', name);
+    console.log('\n' + '='.repeat(50));
+    console.log('🎥 STUDENT JOINING VIDEO ROOM');
+    console.log('   Room:', roomName);
+    console.log('   Student Name:', name);
+    console.log('   Active rooms in memory:', activeVideoRooms.size);
+    console.log('   Room exists in memory:', activeVideoRooms.has(roomName));
+    console.log('='.repeat(50));
     
     // Check if Video API keys are configured
     if (!hasVideoApiKeys()) {
@@ -987,36 +1035,76 @@ app.get('/api/video/join/:roomName', async (req, res) => {
     }
     
     try {
-        // Check if room exists
-        const roomInfo = activeVideoRooms.get(roomName);
+        // Check if room exists in memory
+        let roomInfo = activeVideoRooms.get(roomName);
+        
+        // If not in memory, try to find in database
         if (!roomInfo) {
-            // Try to find in database
-            if (dbConnected) {
-                const dbRoom = await VideoRoom.findOne({ roomName });
-                if (!dbRoom) {
-                    return res.status(404).json({ success: false, error: 'Video room not found or has expired' });
-                }
-                if (dbRoom.status === 'completed') {
-                    return res.status(400).json({ success: false, error: 'This video call has already ended' });
+            console.log('   Room NOT in memory, checking database...');
+            console.log('   Mongoose state:', mongoose.connection.readyState);
+            // 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
+            
+            // Wait for database connection if it's still connecting
+            if (mongoose.connection.readyState === 2) {
+                console.log('   Database is connecting, waiting...');
+                await waitForDbConnection(5000);
+            }
+            
+            const canUseDb = isDbConnected();
+            console.log('   Can use database:', canUseDb);
+            
+            if (canUseDb) {
+                try {
+                    const dbRoom = await VideoRoom.findOne({ roomName });
+                    console.log('   Database lookup result:', dbRoom ? 'FOUND' : 'NOT FOUND');
+                    
+                    if (!dbRoom) {
+                        console.log('❌ Room not found in database:', roomName);
+                        return res.status(404).json({ success: false, error: 'Video room not found or has expired' });
+                    }
+                    if (dbRoom.status === 'completed') {
+                        return res.status(400).json({ success: false, error: 'This video call has already ended' });
+                    }
+                    
+                    // Restore room info from database to memory
+                    roomInfo = {
+                        roomName: dbRoom.roomName,
+                        studentId: dbRoom.studentId,
+                        studentName: dbRoom.studentName,
+                        studentPhone: dbRoom.studentPhone,
+                        teacherId: dbRoom.teacherId,
+                        teacherName: dbRoom.teacherName,
+                        status: dbRoom.status,
+                        joinUrl: dbRoom.joinUrl,
+                        teacherJoined: true,
+                        studentJoined: false
+                    };
+                    activeVideoRooms.set(roomName, roomInfo);
+                    console.log('✅ Room restored from database:', roomName);
+                } catch (dbErr) {
+                    console.error('❌ Database query error:', dbErr.message);
+                    return res.status(500).json({ success: false, error: 'Database error. Please try again.' });
                 }
             } else {
-                return res.status(404).json({ success: false, error: 'Video room not found' });
+                console.log('❌ Room not found (database not connected):', roomName);
+                console.log('   Tip: Database may still be connecting. Try again in a few seconds.');
+                return res.status(404).json({ success: false, error: 'Video room not found. Please try again in a few seconds.' });
             }
+        } else {
+            console.log('   ✅ Room found in memory!');
         }
         
         // Generate token for student
         const token = generateVideoToken(name, roomName);
         
         // Update room status
-        if (roomInfo) {
-            roomInfo.studentJoined = true;
-            if (roomInfo.teacherJoined) {
-                roomInfo.status = 'active';
-            }
+        roomInfo.studentJoined = true;
+        if (roomInfo.teacherJoined) {
+            roomInfo.status = 'active';
         }
         
         // Update database
-        if (dbConnected) {
+        if (isDbConnected()) {
             await VideoRoom.findOneAndUpdate(
                 { roomName },
                 { status: roomInfo?.teacherJoined ? 'active' : 'waiting' }
@@ -1714,8 +1802,31 @@ app.get('/health', (req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         twilio: !!twilioClient,
-        database: dbConnected ? 'MongoDB Connected' : 'In-Memory',
-        websocket: wsClients.size + ' clients'
+        twilioVideo: hasVideoApiKeys(),
+        database: isDbConnected() ? 'MongoDB Connected' : 'Disconnected',
+        mongoState: mongoose.connection.readyState,
+        websocket: wsClients.size + ' clients',
+        activeVideoRooms: activeVideoRooms.size
+    });
+});
+
+// Debug endpoint to check video rooms
+app.get('/api/debug/video-rooms', (req, res) => {
+    const rooms = [];
+    activeVideoRooms.forEach((value, key) => {
+        rooms.push({
+            roomName: key,
+            studentName: value.studentName,
+            status: value.status,
+            teacherJoined: value.teacherJoined,
+            studentJoined: value.studentJoined
+        });
+    });
+    res.json({
+        count: activeVideoRooms.size,
+        dbConnected: isDbConnected(),
+        mongoState: mongoose.connection.readyState,
+        rooms
     });
 });
 
@@ -1728,7 +1839,7 @@ server.listen(PORT, () => {
     console.log('🚀 QURAN ACADEMY SERVER STARTED');
     console.log('='.repeat(50));
     console.log(`   Port: ${PORT}`);
-    console.log(`   Database: ${dbConnected ? 'MongoDB Connected ✓' : 'In-Memory (add MONGODB_URI)'}`);
+    console.log(`   Database: ${isDbConnected() ? 'MongoDB Connected ✓' : 'Connecting... (state: ' + mongoose.connection.readyState + ')'}`);
     console.log(`   Twilio Voice/SMS: ${twilioClient ? 'Connected ✓' : 'Not configured'}`);
     console.log(`   Twilio Video: ${hasVideoApiKeys() ? 'Configured ✓' : 'Not configured (add TWILIO_API_KEY_SID & TWILIO_API_KEY_SECRET)'}`);
     console.log(`   WebSocket: Enabled ✓`);
