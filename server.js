@@ -839,12 +839,21 @@ function generateRoomName() {
     return 'quran-room-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
 }
 
+// Check if Video API keys are configured
+function hasVideoApiKeys() {
+    return process.env.TWILIO_API_KEY_SID && process.env.TWILIO_API_KEY_SECRET;
+}
+
 // Generate access token for video room
 function generateVideoToken(identity, roomName) {
+    if (!hasVideoApiKeys()) {
+        throw new Error('Video API keys not configured. Please add TWILIO_API_KEY_SID and TWILIO_API_KEY_SECRET to environment variables.');
+    }
+    
     const token = new AccessToken(
         config.twilio.accountSid,
-        process.env.TWILIO_API_KEY_SID || config.twilio.accountSid,
-        process.env.TWILIO_API_KEY_SECRET || config.twilio.authToken,
+        process.env.TWILIO_API_KEY_SID,
+        process.env.TWILIO_API_KEY_SECRET,
         { identity: identity }
     );
     
@@ -865,6 +874,15 @@ app.post('/api/video/create-room', async (req, res) => {
     console.log('   Student:', studentName);
     console.log('   Teacher:', teacherName);
     console.log('='.repeat(50));
+    
+    // Check if Video API keys are configured
+    if (!hasVideoApiKeys()) {
+        console.error('❌ Video API keys not configured');
+        return res.status(500).json({ 
+            success: false, 
+            error: 'Video calling is not configured. Please add TWILIO_API_KEY_SID and TWILIO_API_KEY_SECRET to Render environment variables.' 
+        });
+    }
     
     if (!studentPhone || !studentName) {
         return res.status(400).json({ success: false, error: 'Student info required' });
@@ -949,6 +967,15 @@ app.get('/api/video/join/:roomName', async (req, res) => {
     const { name } = req.query;
     
     console.log('🎥 Student joining room:', roomName, 'Name:', name);
+    
+    // Check if Video API keys are configured
+    if (!hasVideoApiKeys()) {
+        console.error('❌ Video API keys not configured');
+        return res.status(500).json({ 
+            success: false, 
+            error: 'Video calling is not configured on the server. Please contact your administrator.' 
+        });
+    }
     
     if (!roomName || !name) {
         return res.status(400).json({ success: false, error: 'Room name and participant name required' });
@@ -1697,7 +1724,8 @@ server.listen(PORT, () => {
     console.log('='.repeat(50));
     console.log(`   Port: ${PORT}`);
     console.log(`   Database: ${dbConnected ? 'MongoDB Connected ✓' : 'In-Memory (add MONGODB_URI)'}`);
-    console.log(`   Twilio: ${twilioClient ? 'Connected ✓' : 'Not configured'}`);
+    console.log(`   Twilio Voice/SMS: ${twilioClient ? 'Connected ✓' : 'Not configured'}`);
+    console.log(`   Twilio Video: ${hasVideoApiKeys() ? 'Configured ✓' : 'Not configured (add TWILIO_API_KEY_SID & TWILIO_API_KEY_SECRET)'}`);
     console.log(`   WebSocket: Enabled ✓`);
     console.log('='.repeat(50) + '\n');
 });
