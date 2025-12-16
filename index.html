@@ -3564,15 +3564,7 @@
                 String(s._id) === String(selectedStudentId)
             ), [students, selectedStudentId]);
 
-            const RealTimeNotice = () => (
-                <div className={`border-l-4 p-4 rounded-lg mb-6 flex items-start gap-3 text-sm ${darkMode ? 'bg-green-900/30 border-green-500 text-green-300' : 'bg-green-100 border-green-500 text-green-800'}`}>
-                    <Icons.Info className="w-5 h-5 mt-0.5 flex-shrink-0" />
-                    <div>
-                        <p className="font-bold">Live Calling Mode Active</p>
-                        <p>This Call Center is connected to a live backend. Calls initiated here will be real phone calls.</p>
-                    </div>
-                </div>
-            );
+
             
             const CallSummaryIcon = ({ reason }) => {
                 const reasonLower = (reason || '').toLowerCase();
@@ -3626,7 +3618,6 @@
 
             return (
                 <div>
-                    <RealTimeNotice />
                     <div className={`p-8 rounded-2xl shadow-sm border dark-transition ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
                         <h2 className={`text-xl font-bold mb-4 ${darkMode ? 'text-white' : 'text-slate-800'}`}>Select a Student to Call</h2>
                         {students.length > 0 ? (
