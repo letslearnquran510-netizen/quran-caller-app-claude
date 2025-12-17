@@ -1,5 +1,5 @@
 // ========================================
-// QURAN ACADEMY CALLING SERVER
+// QURAN ACADEMY CALLINGg SERVER
 // HIGH PERFORMANCE VERSION
 // Optimized for 400+ concurrent users
 // ========================================
@@ -2546,3 +2546,4 @@ server.listen(PORT, () => {
     console.log(`   WebSocket: Enabled ✓`);
     console.log('='.repeat(50) + '\n');
 });
+
