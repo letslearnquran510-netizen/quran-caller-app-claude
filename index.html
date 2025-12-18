@@ -1361,10 +1361,12 @@
             );
         };
 
-        const HistorySection = ({ user, callHistory, darkMode }) => {
+        const HistorySection = ({ user, callHistory, darkMode, onDeleteHistory }) => {
             const [searchTerm, setSearchTerm] = useState('');
             const [nowPlaying, setNowPlaying] = useState(null);
             const [currentPage, setCurrentPage] = useState(1);
+            const [selectedItems, setSelectedItems] = useState(new Set());
+            const [isDeleting, setIsDeleting] = useState(false);
             const ITEMS_PER_PAGE = 10;
 
             const filteredHistory = useMemo(() => callHistory.filter(c =>
@@ -1397,6 +1399,82 @@
             const handlePrevPage = () => {
                 setCurrentPage(prev => Math.max(prev - 1, 1));
             };
+
+            // Selection handlers
+            const toggleSelectItem = (itemId) => {
+                setSelectedItems(prev => {
+                    const newSet = new Set(prev);
+                    if (newSet.has(itemId)) {
+                        newSet.delete(itemId);
+                    } else {
+                        newSet.add(itemId);
+                    }
+                    return newSet;
+                });
+            };
+
+            const toggleSelectAll = () => {
+                if (selectedItems.size === paginatedHistory.length) {
+                    // Deselect all on current page
+                    setSelectedItems(new Set());
+                } else {
+                    // Select all on current page
+                    const allIds = new Set(paginatedHistory.map(call => call.id || call._id || call.callSid));
+                    setSelectedItems(allIds);
+                }
+            };
+
+            const selectAllFiltered = () => {
+                // Select ALL filtered items (not just current page)
+                const allIds = new Set(filteredHistory.map(call => call.id || call._id || call.callSid));
+                setSelectedItems(allIds);
+            };
+
+            const clearSelection = () => {
+                setSelectedItems(new Set());
+            };
+
+            const handleDeleteSelected = async () => {
+                if (selectedItems.size === 0) return;
+                
+                const confirmDelete = window.confirm(
+                    `Are you sure you want to delete ${selectedItems.size} call record${selectedItems.size > 1 ? 's' : ''}? This action cannot be undone.`
+                );
+                
+                if (!confirmDelete) return;
+                
+                setIsDeleting(true);
+                try {
+                    const idsToDelete = Array.from(selectedItems);
+                    const response = await fetch(`${API_BASE}/api/call-history/delete`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ids: idsToDelete })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Call parent to update state
+                        if (onDeleteHistory) {
+                            onDeleteHistory(idsToDelete);
+                        }
+                        setSelectedItems(new Set());
+                        alert(`Successfully deleted ${result.deletedCount || idsToDelete.length} record(s)`);
+                    } else {
+                        alert('Failed to delete records: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (err) {
+                    console.error('Delete error:', err);
+                    alert('Failed to delete records. Please try again.');
+                } finally {
+                    setIsDeleting(false);
+                }
+            };
+
+            // Check if all items on current page are selected
+            const allPageSelected = paginatedHistory.length > 0 && 
+                paginatedHistory.every(call => selectedItems.has(call.id || call._id || call.callSid));
 
 
             const getStatusInfo = (status) => {
@@ -1432,10 +1510,115 @@
                     color: darkMode ? 'bg-violet-900/50 text-violet-300 border-violet-700' : 'bg-violet-50 text-violet-700 border-violet-200'
                 };
             };
+            
+            // Determine if call is video or audio
+            const getCallType = (call) => {
+                const isVideo = call.callType === 'video' || 
+                               call.type === 'video' || 
+                               call.status?.toLowerCase().includes('video') ||
+                               call.roomName || // Video calls have roomName
+                               call.isVideoCall;
+                
+                if (isVideo) {
+                    return {
+                        isVideo: true,
+                        label: 'Video Call',
+                        icon: (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                        ),
+                        color: darkMode ? 'bg-purple-900/50 text-purple-300 border-purple-700' : 'bg-purple-50 text-purple-700 border-purple-200'
+                    };
+                }
+                return {
+                    isVideo: false,
+                    label: 'Voice Call',
+                    icon: (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                    ),
+                    color: darkMode ? 'bg-emerald-900/50 text-emerald-300 border-emerald-700' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                };
+            };
+            
+            // Download recording function
+            const downloadRecording = async (recordingUrl, studentName, callSid) => {
+                if (!recordingUrl) {
+                    alert('Recording not available');
+                    return;
+                }
+                
+                try {
+                    // Create filename
+                    const date = new Date().toISOString().split('T')[0];
+                    const filename = `Recording_${studentName.replace(/\s+/g, '_')}_${date}_${callSid || 'call'}.mp3`;
+                    
+                    // Fetch the recording
+                    const response = await fetch(recordingUrl);
+                    const blob = await response.blob();
+                    
+                    // Create download link
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    // Cleanup
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } catch (err) {
+                    console.error('Download error:', err);
+                    // Fallback: open in new tab
+                    window.open(recordingUrl, '_blank');
+                }
+            };
 
             return (
                 <div className={`p-6 rounded-2xl shadow-sm border dark-transition ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'}`}>
-                    <h2 className={`text-lg font-bold mb-4 ${darkMode ? 'text-white' : 'text-slate-800'}`}>Call Log ({filteredHistory.length} records)</h2>
+                    <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                        <h2 className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-slate-800'}`}>Call Log ({filteredHistory.length} records)</h2>
+                        
+                        {/* Selection Controls - Only show for admin */}
+                        {user.type === 'admin' && selectedItems.size > 0 && (
+                            <div className="flex items-center gap-2">
+                                <span className={`text-sm font-medium ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                    {selectedItems.size} selected
+                                </span>
+                                <button
+                                    onClick={clearSelection}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${darkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                >
+                                    Clear
+                                </button>
+                                <button
+                                    onClick={handleDeleteSelected}
+                                    disabled={isDeleting}
+                                    className="px-4 py-1.5 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isDeleting ? (
+                                        <>
+                                            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            <span>Deleting...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Icons.Trash className="w-4 h-4" />
+                                            <span>Delete Selected</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    
                     <div className="relative mb-4">
                         <input type="text" placeholder="Search by student or teacher name..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className={`w-full p-3 pl-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none dark-transition ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`} />
                         <Icons.Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-slate-400'}`} />
@@ -1443,23 +1626,82 @@
 
                     {paginatedHistory.length > 0 ? (
                         <>
+                            {/* Select All Header - Only for admin */}
+                            {user.type === 'admin' && (
+                                <div className={`flex items-center justify-between px-4 py-2 mb-2 rounded-lg ${darkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={allPageSelected}
+                                            onChange={toggleSelectAll}
+                                            className="w-5 h-5 rounded border-2 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                        />
+                                        <span className={`text-sm font-medium ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                            Select All on Page
+                                        </span>
+                                    </label>
+                                    {filteredHistory.length > ITEMS_PER_PAGE && (
+                                        <button
+                                            onClick={selectAllFiltered}
+                                            className={`text-sm font-medium underline hover:no-underline ${darkMode ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-700'}`}
+                                        >
+                                            Select All {filteredHistory.length} Records
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                            
                             <div className="space-y-4 custom-scrollbar overflow-y-auto max-h-[60vh] pr-2">
                                 {paginatedHistory.map((call, index) => {
                                     const { color, icon } = getStatusInfo(call.status);
                                     const direction = getCallDirection(call);
+                                    const callType = getCallType(call);
+                                    const itemId = call.id || call._id || call.callSid;
+                                    const isSelected = selectedItems.has(itemId);
+                                    
                                     return (
-                                        <div key={call.id} className={`p-4 rounded-lg border flex flex-wrap items-center justify-between gap-x-6 gap-y-4 animate-fade-in dark-transition ${darkMode ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`} style={{ animationDelay: `${index * 30}ms` }}>
+                                        <div 
+                                            key={itemId} 
+                                            className={`p-4 rounded-lg border flex flex-wrap items-center justify-between gap-x-6 gap-y-4 animate-fade-in dark-transition ${
+                                                isSelected 
+                                                    ? (darkMode ? 'bg-indigo-900/30 border-indigo-500' : 'bg-indigo-50 border-indigo-300')
+                                                    : (darkMode ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200')
+                                            }`} 
+                                            style={{ animationDelay: `${index * 30}ms` }}
+                                        >
+                                            {/* Checkbox for admin */}
+                                            {user.type === 'admin' && (
+                                                <div className="flex-shrink-0">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => toggleSelectItem(itemId)}
+                                                        className="w-5 h-5 rounded border-2 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                    />
+                                                </div>
+                                            )}
+                                            
                                             <div className="flex items-center gap-4 flex-1 min-w-[200px]">
-                                                {/* Call Direction Indicator */}
+                                                {/* Call Type and Direction Indicator */}
                                                 <div className={`relative`}>
                                                     <StudentAvatar name={call.studentName} size="md" />
-                                                    <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 ${direction.color}`} title={direction.label}>
+                                                    {/* Call Type Icon (Video/Audio) - Top Right */}
+                                                    <div className={`absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 ${callType.color}`} title={callType.label}>
+                                                        {callType.icon}
+                                                    </div>
+                                                    {/* Direction Icon - Bottom Right */}
+                                                    <div className={`absolute -bottom-1 -left-1 w-5 h-5 rounded-full flex items-center justify-center border-2 ${direction.color}`} title={direction.label}>
                                                         {direction.icon}
                                                     </div>
                                                 </div>
                                                 <div>
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         <p className={`font-bold text-lg ${darkMode ? 'text-white' : 'text-slate-800'}`}>{call.studentName}</p>
+                                                        {/* Call Type Badge (Video/Voice) */}
+                                                        <span className={`px-2 py-0.5 text-xs font-bold rounded-full flex items-center gap-1 border ${callType.color}`}>
+                                                            {callType.icon}
+                                                            {callType.label}
+                                                        </span>
                                                         {/* Direction Badge */}
                                                         <span className={`px-2 py-0.5 text-xs font-bold rounded-full flex items-center gap-1 border ${direction.color}`}>
                                                             {direction.icon}
@@ -1489,19 +1731,45 @@
                                                 </span>
                                             </div>
 
-                                            <div className="flex-shrink-0">
-                                                {call.callSid && user.type === 'admin' && call.status.includes('Completed') && call.duration > 0 && (
+                                            <div className="flex-shrink-0 flex items-center gap-2">
+                                                {/* Play Recording Button - Voice calls only */}
+                                                {call.callSid && user.type === 'admin' && call.status.includes('Completed') && call.duration > 0 && !callType.isVideo && (
                                                     <button 
                                                         onClick={() => setNowPlaying({ 
                                                             url: call.recordingUrl, 
                                                             studentName: call.studentName,
                                                             callSid: call.callSid 
                                                         })}
-                                                        className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white font-semibold rounded-lg text-sm hover:bg-indigo-600 transition-colors"
+                                                        className="flex items-center gap-2 px-3 py-2 bg-indigo-500 text-white font-semibold rounded-lg text-sm hover:bg-indigo-600 transition-colors"
+                                                        title="Play Recording"
                                                     >
                                                         <Icons.Play className="w-4 h-4" />
-                                                        <span>Play Recording</span>
+                                                        <span className="hidden sm:inline">Play</span>
                                                     </button>
+                                                )}
+                                                
+                                                {/* Download Recording Button - Voice calls only */}
+                                                {call.recordingUrl && user.type === 'admin' && call.status.includes('Completed') && call.duration > 0 && !callType.isVideo && (
+                                                    <button 
+                                                        onClick={() => downloadRecording(call.recordingUrl, call.studentName, call.callSid)}
+                                                        className={`flex items-center gap-2 px-3 py-2 font-semibold rounded-lg text-sm transition-colors ${darkMode ? 'bg-slate-600 text-white hover:bg-slate-500' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
+                                                        title="Download Recording"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                        </svg>
+                                                        <span className="hidden sm:inline">Download</span>
+                                                    </button>
+                                                )}
+                                                
+                                                {/* Video Call Badge - No recording available */}
+                                                {callType.isVideo && (
+                                                    <span className={`px-3 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 ${darkMode ? 'bg-purple-900/50 text-purple-300' : 'bg-purple-100 text-purple-700'}`}>
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                        </svg>
+                                                        Video Session
+                                                    </span>
                                                 )}
                                             </div>
                                         </div>
@@ -2097,6 +2365,14 @@
                 }
             };
 
+            // Handle deletion of call history records
+            const handleDeleteHistory = (deletedIds) => {
+                setCallHistory(prev => prev.filter(call => {
+                    const callId = call.id || call._id || call.callSid;
+                    return !deletedIds.includes(callId);
+                }));
+            };
+
             // Show loading screen while data loads
             if (!dataLoaded) {
                 return (
@@ -2145,6 +2421,7 @@
                         updateTeacher={updateTeacher}
                         deleteTeacher={deleteTeacher}
                         addCallToHistoryAPI={addCallToHistoryAPI}
+                        handleDeleteHistory={handleDeleteHistory}
                         darkMode={darkMode}
                         toggleDarkMode={toggleDarkMode}
                     />
@@ -2442,7 +2719,7 @@
 
         // --- Dashboard Component (The main logged-in view) ---
         const Dashboard = (props) => {
-            const { user, onLogout, students, setStudents, callHistory, setCallHistory, teachers, setTeachers, addToast, setConfirmation, setPrompt, dbStatus, addStudent: addStudentAPI, updateStudent: updateStudentAPI, deleteStudent: deleteStudentAPI, addTeacher: addTeacherAPI, updateTeacher: updateTeacherAPI, deleteTeacher: deleteTeacherAPI, addCallToHistoryAPI, conversations, setConversations, smsMessages, setSmsMessages, darkMode, toggleDarkMode } = props;
+            const { user, onLogout, students, setStudents, callHistory, setCallHistory, teachers, setTeachers, addToast, setConfirmation, setPrompt, dbStatus, addStudent: addStudentAPI, updateStudent: updateStudentAPI, deleteStudent: deleteStudentAPI, addTeacher: addTeacherAPI, updateTeacher: updateTeacherAPI, deleteTeacher: deleteTeacherAPI, addCallToHistoryAPI, handleDeleteHistory, conversations, setConversations, smsMessages, setSmsMessages, darkMode, toggleDarkMode } = props;
             const [activeSection, setActiveSection] = useState(user.type === 'admin' ? 'overview' : 'students');
             const [isSidebarOpen, setSidebarOpen] = useState(false);
             
@@ -3204,9 +3481,10 @@
                             students={students}
                             addToast={addToast}
                             darkMode={darkMode}
+                            addCallToHistoryAPI={addCallToHistoryAPI}
                         />;
                     case 'history':
-                        return <HistorySection user={user} callHistory={callHistory} darkMode={darkMode} />;
+                        return <HistorySection user={user} callHistory={callHistory} darkMode={darkMode} onDeleteHistory={handleDeleteHistory} />;
                     case 'messages':
                         return <MessagesSection 
                             user={user} 
@@ -3672,7 +3950,7 @@
         };
 
         // --- Video Call Section Component ---
-        const VideoCallSection = ({ user, students, addToast }) => {
+        const VideoCallSection = ({ user, students, addToast, addCallToHistoryAPI }) => {
             const [selectedStudentId, setSelectedStudentId] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [isInCall, setIsInCall] = useState(false);
@@ -4232,6 +4510,9 @@
                 videoCallEndedRef.current = true;
                 console.log('🔴 Ending video call...');
                 
+                // Save final duration before clearing timer
+                const finalDuration = callDuration;
+                
                 if (timerRef.current) {
                     clearInterval(timerRef.current);
                     timerRef.current = null;
@@ -4265,6 +4546,27 @@
                         });
                     } catch (err) {
                         console.error('End room error:', err);
+                    }
+                }
+                
+                // Save video call to history
+                if (currentRoom && addCallToHistoryAPI) {
+                    try {
+                        console.log('📝 Saving video call to history...');
+                        await addCallToHistoryAPI({
+                            studentName: currentRoom.studentName,
+                            studentPhone: currentRoom.studentPhone,
+                            teacherName: user.name,
+                            teacherId: user.id || user._id,
+                            status: studentJoined ? 'Video Call - Completed' : 'Video Call - Missed',
+                            duration: finalDuration,
+                            callType: 'video',
+                            roomName: currentRoom.roomName,
+                            direction: 'outbound'
+                        });
+                        console.log('✅ Video call saved to history');
+                    } catch (historyErr) {
+                        console.error('Failed to save video call to history:', historyErr);
                     }
                 }
                 
