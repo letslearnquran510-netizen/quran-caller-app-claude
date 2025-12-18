@@ -160,9 +160,9 @@
             enable() {
                 this.enabled = true;
                 if (this.bypassGain && this.gainNode) {
-                    // Route through filters
-                    this.bypassGain.gain.value = 0;
-                    this.gainNode.gain.value = 1.2;
+                    // Route through filters with smooth transition
+                    this.bypassGain.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.1);
+                    this.gainNode.gain.setTargetAtTime(1.0, this.audioContext.currentTime, 0.1);
                 }
                 console.log('🔇 Noise Cancellation ENABLED');
                 return this.enabled;
@@ -172,9 +172,9 @@
             disable() {
                 this.enabled = false;
                 if (this.bypassGain && this.gainNode) {
-                    // Bypass filters, direct to output
-                    this.bypassGain.gain.value = 1;
-                    this.gainNode.gain.value = 0;
+                    // Bypass filters with smooth transition
+                    this.bypassGain.gain.setTargetAtTime(1, this.audioContext.currentTime, 0.1);
+                    this.gainNode.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.1);
                 }
                 console.log('🔊 Noise Cancellation DISABLED');
                 return this.enabled;
@@ -203,41 +203,41 @@
                         latencyHint: 'interactive'
                     });
                     
-                    // High-pass filter to remove low frequency rumble (below 80Hz)
+                    // GENTLE High-pass filter - only remove very low rumble (below 60Hz)
                     this.highpassFilter = this.audioContext.createBiquadFilter();
                     this.highpassFilter.type = 'highpass';
-                    this.highpassFilter.frequency.value = 80;
-                    this.highpassFilter.Q.value = 0.7;
+                    this.highpassFilter.frequency.value = 60; // Lower frequency - less aggressive
+                    this.highpassFilter.Q.value = 0.5; // Lower Q for gentler slope
                     
-                    // Low-pass filter to remove high frequency hiss (above 12kHz for voice)
+                    // GENTLE Low-pass filter - preserve more high frequencies for clarity
                     this.lowpassFilter = this.audioContext.createBiquadFilter();
                     this.lowpassFilter.type = 'lowpass';
-                    this.lowpassFilter.frequency.value = 12000;
-                    this.lowpassFilter.Q.value = 0.7;
+                    this.lowpassFilter.frequency.value = 14000; // Higher - preserve more voice clarity
+                    this.lowpassFilter.Q.value = 0.5;
                     
-                    // Notch filter to remove 50/60Hz electrical hum
+                    // Notch filter to remove 50Hz electrical hum (narrow)
                     this.notchFilter = this.audioContext.createBiquadFilter();
                     this.notchFilter.type = 'notch';
                     this.notchFilter.frequency.value = 50;
-                    this.notchFilter.Q.value = 30;
+                    this.notchFilter.Q.value = 10; // Narrower notch - less impact on voice
                     
                     // Second notch for 60Hz (US power frequency)
                     this.notchFilter2 = this.audioContext.createBiquadFilter();
                     this.notchFilter2.type = 'notch';
                     this.notchFilter2.frequency.value = 60;
-                    this.notchFilter2.Q.value = 30;
+                    this.notchFilter2.Q.value = 10;
                     
-                    // Compressor for dynamic range control and noise reduction
+                    // GENTLE Compressor - just for light leveling, NOT aggressive noise reduction
                     this.compressor = this.audioContext.createDynamicsCompressor();
-                    this.compressor.threshold.value = -50;
-                    this.compressor.knee.value = 40;
-                    this.compressor.ratio.value = 12;
-                    this.compressor.attack.value = 0.003;
-                    this.compressor.release.value = 0.25;
+                    this.compressor.threshold.value = -24; // Higher threshold - only compress loud sounds
+                    this.compressor.knee.value = 30; // Soft knee for natural sound
+                    this.compressor.ratio.value = 3; // Gentle ratio - was 12 (too aggressive!)
+                    this.compressor.attack.value = 0.01; // Slightly slower attack
+                    this.compressor.release.value = 0.15; // Faster release for natural sound
                     
                     // Gain node for output level control (processed path)
                     this.gainNode = this.audioContext.createGain();
-                    this.gainNode.gain.value = this.enabled ? 1.2 : 0;
+                    this.gainNode.gain.value = this.enabled ? 1.0 : 0; // No boost - was 1.2 causing distortion
                     
                     // Bypass gain for direct signal (when NC is OFF)
                     this.bypassGain = this.audioContext.createGain();
@@ -302,7 +302,7 @@
                     
                     // Set initial state based on enabled flag
                     if (this.enabled) {
-                        this.gainNode.gain.value = 1.2;
+                        this.gainNode.gain.value = 1.0; // No boost - natural level
                         this.bypassGain.gain.value = 0;
                     } else {
                         this.gainNode.gain.value = 0;
@@ -3837,12 +3837,21 @@
                     }, 1000);
                     
                     // Attach local video
+                    // Attach local video with proper styling
                     room.localParticipant.tracks.forEach(publication => {
                         if (publication.track && publication.track.kind === 'video') {
                             const localContainer = localVideoRef.current;
                             if (localContainer) {
                                 localContainer.innerHTML = '';
-                                localContainer.appendChild(publication.track.attach());
+                                const videoElement = publication.track.attach();
+                                // Style the local video element properly
+                                videoElement.style.width = '100%';
+                                videoElement.style.height = '100%';
+                                videoElement.style.objectFit = 'cover';
+                                videoElement.style.borderRadius = '12px';
+                                videoElement.style.transform = 'scaleX(-1)'; // Mirror the video
+                                localContainer.appendChild(videoElement);
+                                console.log('✅ Local video attached and styled (mirrored)');
                             }
                         }
                     });
@@ -3949,19 +3958,26 @@
                     const videoElement = track.attach();
                     videoElement.style.width = '100%';
                     videoElement.style.height = '100%';
-                    videoElement.style.objectFit = 'contain';
                     videoElement.style.position = 'absolute';
                     videoElement.style.top = '0';
                     videoElement.style.left = '0';
-                    videoElement.style.zIndex = '5';
                     
                     // Check if this is a screen share track
                     if (track.name && track.name.includes('screen')) {
-                        videoElement.style.objectFit = 'contain'; // Screen share should contain, not cover
+                        videoElement.style.objectFit = 'contain'; // Screen share - contain to see all
+                        videoElement.style.zIndex = '15'; // Screen share on top
+                        videoElement.style.backgroundColor = '#000';
                         console.log('📺 Screen share track received from student');
                     } else {
+                        // Camera video - use cover to fill the area nicely
+                        videoElement.style.objectFit = 'cover';
+                        videoElement.style.zIndex = '5';
                         console.log('📹 Camera video track received from student');
                     }
+                    
+                    // Remove any existing waiting message when video arrives
+                    const waitingDiv = remoteContainer.querySelector('.waiting-message');
+                    if (waitingDiv) waitingDiv.remove();
                     
                     remoteContainer.appendChild(videoElement);
                     console.log('✅ Remote video attached and styled');
@@ -4324,20 +4340,22 @@
                             {/* Remote Video - Student's camera or shared screen */}
                             <div 
                                 ref={remoteVideoRef}
-                                className="absolute inset-0 flex items-center justify-center"
+                                className="absolute inset-0"
                                 style={{ 
                                     backgroundColor: '#0f0d1a',
                                 }}
                             >
                                 {/* Waiting state - only show when student not joined */}
                                 {!studentJoined && (
-                                    <div className="text-center text-slate-400 z-10">
-                                        <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                                        <p className="text-xl mb-2">Waiting for student...</p>
-                                        <p className="text-sm">SMS invitation sent to {displayName}</p>
-                                        <p className="text-xs mt-4 text-slate-500 max-w-md break-all px-4">
-                                            {currentRoom.joinUrl}
-                                        </p>
+                                    <div className="waiting-message absolute inset-0 flex items-center justify-center text-center text-slate-400 z-10">
+                                        <div>
+                                            <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                            <p className="text-xl mb-2">Waiting for student...</p>
+                                            <p className="text-sm">SMS invitation sent to {displayName}</p>
+                                            <p className="text-xs mt-4 text-slate-500 max-w-md break-all px-4">
+                                                {currentRoom.joinUrl}
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -4349,7 +4367,6 @@
                                     isDragging ? 'border-green-400 cursor-grabbing scale-105' : 'border-indigo-500 cursor-grab hover:border-indigo-400'
                                 } transition-all duration-150`}
                                 style={{ 
-                                    transform: 'scaleX(-1)',
                                     // Use custom position if set, otherwise default to bottom-right
                                     ...(pipPosition.x !== null ? {
                                         left: `${pipPosition.x}px`,
@@ -4365,7 +4382,7 @@
                                 onTouchEnd={handlePipTouchEnd}
                             >
                                 {/* Drag handle indicator */}
-                                <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 pointer-events-none" style={{ transform: 'scaleX(-1)' }}>
+                                <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
                                     <div className="flex gap-0.5">
                                         <div className="w-1 h-1 bg-white/50 rounded-full"></div>
                                         <div className="w-1 h-1 bg-white/50 rounded-full"></div>
