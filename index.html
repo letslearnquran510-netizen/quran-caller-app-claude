@@ -1446,13 +1446,16 @@
                 setIsDeleting(true);
                 try {
                     const idsToDelete = Array.from(selectedItems);
-                    const response = await fetch(`${API_BASE}/api/call-history/delete`, {
+                    console.log('🗑️ Deleting IDs:', idsToDelete);
+                    
+                    const response = await fetch(`${BACKEND_URL}/api/call-history/delete`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ ids: idsToDelete })
                     });
                     
                     const result = await response.json();
+                    console.log('🗑️ Delete response:', result);
                     
                     if (result.success) {
                         // Call parent to update state
