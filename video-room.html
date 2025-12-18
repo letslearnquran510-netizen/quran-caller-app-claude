@@ -525,7 +525,7 @@
     <script>
         // ============================================================
         // PROFESSIONAL NOISE CANCELLATION SYSTEM FOR STUDENTS
-        // Real-time audio processing - same quality as teacher side
+        // Real-time audio processing - GENTLE settings for clear voice
         // ============================================================
         
         class StudentNoiseCancellation {
@@ -543,43 +543,43 @@
                         latencyHint: 'interactive'
                     });
                     
-                    // High-pass filter - removes low frequency rumble
+                    // GENTLE High-pass filter - only remove very low rumble
                     this.highpassFilter = this.audioContext.createBiquadFilter();
                     this.highpassFilter.type = 'highpass';
-                    this.highpassFilter.frequency.value = 80;
-                    this.highpassFilter.Q.value = 0.7;
+                    this.highpassFilter.frequency.value = 60; // Lower - less aggressive
+                    this.highpassFilter.Q.value = 0.5;
                     
-                    // Low-pass filter - removes high frequency hiss
+                    // GENTLE Low-pass filter - preserve voice clarity
                     this.lowpassFilter = this.audioContext.createBiquadFilter();
                     this.lowpassFilter.type = 'lowpass';
-                    this.lowpassFilter.frequency.value = 12000;
-                    this.lowpassFilter.Q.value = 0.7;
+                    this.lowpassFilter.frequency.value = 14000; // Higher - more clarity
+                    this.lowpassFilter.Q.value = 0.5;
                     
-                    // Notch filters for electrical hum removal
+                    // Narrow notch filters for electrical hum removal
                     this.notchFilter50 = this.audioContext.createBiquadFilter();
                     this.notchFilter50.type = 'notch';
                     this.notchFilter50.frequency.value = 50;
-                    this.notchFilter50.Q.value = 30;
+                    this.notchFilter50.Q.value = 10; // Narrower - less impact
                     
                     this.notchFilter60 = this.audioContext.createBiquadFilter();
                     this.notchFilter60.type = 'notch';
                     this.notchFilter60.frequency.value = 60;
-                    this.notchFilter60.Q.value = 30;
+                    this.notchFilter60.Q.value = 10;
                     
-                    // Compressor for noise reduction
+                    // GENTLE Compressor - just for light leveling
                     this.compressor = this.audioContext.createDynamicsCompressor();
-                    this.compressor.threshold.value = -50;
-                    this.compressor.knee.value = 40;
-                    this.compressor.ratio.value = 12;
-                    this.compressor.attack.value = 0.003;
-                    this.compressor.release.value = 0.25;
+                    this.compressor.threshold.value = -24; // Higher - only compress loud
+                    this.compressor.knee.value = 30; // Soft knee
+                    this.compressor.ratio.value = 3; // Gentle ratio (was 12!)
+                    this.compressor.attack.value = 0.01;
+                    this.compressor.release.value = 0.15;
                     
-                    // Gain control
+                    // Gain control - no boost
                     this.gainNode = this.audioContext.createGain();
-                    this.gainNode.gain.value = 1.2;
+                    this.gainNode.gain.value = 1.0; // No boost (was 1.2)
                     
                     this.initialized = true;
-                    console.log('🎤 Student Noise Cancellation initialized');
+                    console.log('🎤 Student Noise Cancellation initialized (gentle mode)');
                     
                 } catch (err) {
                     console.error('Noise cancellation init failed:', err);
