@@ -1097,21 +1097,46 @@ app.post('/api/call-history', async (req, res) => {
 app.post('/api/call-history/delete', async (req, res) => {
     const { ids } = req.body;
     
+    console.log('🗑️ Delete request received');
+    console.log('   IDs received:', ids);
+    
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        console.log('❌ No valid IDs provided');
         return res.status(400).json({ success: false, error: 'No IDs provided for deletion' });
     }
     
-    console.log('🗑️ Deleting call history records:', ids.length, 'items');
+    console.log('🗑️ Attempting to delete', ids.length, 'call history records');
     
     try {
         if (dbConnected) {
-            // Try to delete by _id first, then by callSid
-            const result = await CallHistory.deleteMany({
-                $or: [
-                    { _id: { $in: ids.filter(id => id.match(/^[0-9a-fA-F]{24}$/)) } },
-                    { callSid: { $in: ids } }
-                ]
-            });
+            // Convert all IDs to strings and filter valid MongoDB ObjectIds
+            const stringIds = ids.map(id => String(id));
+            const validObjectIds = stringIds.filter(id => /^[0-9a-fA-F]{24}$/.test(id));
+            
+            console.log('   Valid ObjectIds:', validObjectIds.length);
+            console.log('   All IDs (for callSid):', stringIds.length);
+            
+            // Build query - match by _id OR by callSid
+            const query = {
+                $or: []
+            };
+            
+            // Add ObjectId matches if any
+            if (validObjectIds.length > 0) {
+                query.$or.push({ _id: { $in: validObjectIds } });
+            }
+            
+            // Always try to match by callSid too
+            query.$or.push({ callSid: { $in: stringIds } });
+            
+            // If no valid query conditions, return error
+            if (query.$or.length === 0) {
+                return res.status(400).json({ success: false, error: 'No valid IDs to delete' });
+            }
+            
+            console.log('   Query:', JSON.stringify(query));
+            
+            const result = await CallHistory.deleteMany(query);
             
             console.log(`✅ Deleted ${result.deletedCount} call history records from database`);
             return res.json({ 
@@ -1121,11 +1146,14 @@ app.post('/api/call-history/delete', async (req, res) => {
             });
         } else {
             // In-memory deletion
+            const stringIds = ids.map(id => String(id));
             const initialLength = inMemoryCallHistory.length;
+            
             inMemoryCallHistory = inMemoryCallHistory.filter(call => {
-                const callId = call.id || call._id || call.callSid;
-                return !ids.includes(callId) && !ids.includes(String(callId));
+                const callId = String(call.id || call._id || call.callSid || '');
+                return !stringIds.includes(callId);
             });
+            
             const deletedCount = initialLength - inMemoryCallHistory.length;
             
             console.log(`✅ Deleted ${deletedCount} call history records from memory`);
@@ -1136,8 +1164,8 @@ app.post('/api/call-history/delete', async (req, res) => {
             });
         }
     } catch (err) {
-        console.error('Delete call history error:', err);
-        res.status(500).json({ success: false, error: 'Failed to delete call history records' });
+        console.error('❌ Delete call history error:', err);
+        res.status(500).json({ success: false, error: 'Failed to delete call history records: ' + err.message });
     }
 });
 
