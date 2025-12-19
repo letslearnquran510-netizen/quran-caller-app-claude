@@ -1446,11 +1446,15 @@
                 setShowDeleteConfirm(false);
                 setIsDeleting(true);
                 
+                // Define URL here to ensure it's always available
+                const API_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000' : window.location.origin;
+                
                 try {
                     const idsToDelete = Array.from(selectedItems);
                     console.log('🗑️ Deleting IDs:', idsToDelete);
+                    console.log('🗑️ API URL:', API_URL);
                     
-                    const response = await fetch(`${BACKEND_URL}/api/call-history/delete`, {
+                    const response = await fetch(`${API_URL}/api/call-history/delete`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ ids: idsToDelete })
